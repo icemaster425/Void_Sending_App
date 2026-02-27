@@ -10,10 +10,10 @@ jobs:
 
     steps:
     - name: Checkout Code
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4  # Updated from v3
 
     - name: Set up Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v5 # Updated from v4
       with:
         python-version: '3.10'
 
@@ -37,7 +37,7 @@ jobs:
         main.py
 
     - name: Upload Executable
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4  # Fixed the v3 Deprecation error
       with:
         name: VOID-Portable-EXE
         path: dist/VOID_System.exe
