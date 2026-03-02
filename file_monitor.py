@@ -2,118 +2,97 @@ import os
 import time
 import threading
 import re
-from watchdog.observers import Observer
-from watchdog.events import FileSystemEventHandler
-from collections import defaultdict
 
-class FileMonitor:
-    def __init__(self, folder_path, db_manager, message_queue, file_extensions, batch_length=6):
+class FileMonitor(threading.Thread):
+    def __init__(self, folder_path, db_manager, message_queue, file_extensions, batch_length):
+        super().__init__()
         self.folder_path = folder_path
         self.db_manager = db_manager
         self.message_queue = message_queue
-        self.file_extensions = [ext.lower().strip() for ext in file_extensions]
-        self.batch_length = str(batch_length)
         
-        self.observer = Observer()
-        self.is_running = threading.Event()
-        self.lock = threading.Lock()
+        # Ensures all extensions from config are lowercase and stripped of spaces for accurate matching
+        self.file_extensions = [ext.strip().lower() for ext in file_extensions]
         
-        # Stores files as they arrive: {batch_id: {'excel': path, 'images': [paths], 'inst_code': code}}
-        self.detected_batches = defaultdict(lambda: {'excel': None, 'images': [], 'institution_code': None})
-        self.batches_in_queue = set()
-        self.event_handler = self._create_event_handler()
+        # Ensures batch length is treated as an integer
+        self.batch_length = int(batch_length) if str(batch_length).isdigit() else 6
+        
+        self.running = False
+        
+        # Keeps track of batches already pushed to the UI so it doesn't spam duplicates
+        self.detected_batches = set()
 
-    def _monitor(self):
-        """Internal loop for the observer thread."""
-        try:
-            self.observer.schedule(self.event_handler, self.folder_path, recursive=False)
-            self.observer.start()
-            self.message_queue.put({'type': 'activity', 'data': f"Monitoring started: {self.folder_path}"})
-            
-            while self.is_running.is_set():
-                time.sleep(1)
-        except Exception as e:
-            self.message_queue.put({'type': 'activity', 'data': f"Critical Monitor Error: {str(e)}"})
-        finally:
-            self.observer.stop()
-            self.observer.join()
+    def run(self):
+        self.running = True
+        self.message_queue.put({'type': 'activity', 'data': f"Started monitoring: {self.folder_path}"})
         
-    def start(self):
-        """Starts monitoring in a background thread."""
-        self.is_running.set()
-        self.thread = threading.Thread(target=self._monitor, daemon=True)
-        self.thread.start()
+        # Background loop runs every 3 seconds while active
+        while self.running:
+            self.scan_folder()
+            time.sleep(3)
+
+    def scan_folder(self):
+        if not os.path.exists(self.folder_path):
+            return
+
+        current_batches = {}
+
+        # Scan all files in the directory
+        for filename in os.listdir(self.folder_path):
+            file_path = os.path.join(self.folder_path, filename)
+            
+            # Skip folders
+            if not os.path.isfile(file_path):
+                continue
+
+            # Check if file matches our allowed extensions (.pdf, .xls, .xlsx)
+            ext = os.path.splitext(filename)[1].lower()
+            if ext not in self.file_extensions:
+                continue
+
+            # Standardized Regex matcher for V.O.I.D. filenames
+            # Looks for: [Letters/Numbers]_[Numbers]
+            # Example: CBA_123456_accounts.xlsx -> Inst: CBA, Batch: 123456
+            match = re.match(r'^([A-Za-z0-9]+)_(\d+)', filename)
+            
+            if match:
+                inst_code = match.group(1).upper()
+                batch_num = match.group(2)
+                
+                # Group files under the same batch number
+                if batch_num not in current_batches:
+                    current_batches[batch_num] = {
+                        'institution_code': inst_code,
+                        'batch_number': batch_num,
+                        'files': []
+                    }
+                current_batches[batch_num]['files'].append(file_path)
+
+        # Push newly completed batches to the GUI
+        for batch_num, batch_data in current_batches.items():
+            if batch_num not in self.detected_batches:
+                self.detected_batches.add(batch_num)
+                
+                # Send the batch data to populate the UI panel
+                self.message_queue.put({
+                    'type': 'batch_detected',
+                    'data': batch_data
+                })
+                
+                # Log the detection in the activity feed
+                file_count = len(batch_data['files'])
+                self.message_queue.put({
+                    'type': 'activity',
+                    'data': f"Detected: {batch_data['institution_code']} Batch {batch_num} ({file_count} files)"
+                })
 
     def stop(self):
-        """Stops the observer."""
-        self.is_running.clear()
+        self.running = False
+        self.message_queue.put({'type': 'activity', 'data': "Monitoring stopped."})
 
     def remove_from_queue(self, batch_number):
-        """Cleans up memory once a batch is processed or cancelled."""
-        with self.lock:
-            if batch_number in self.batches_in_queue:
-                self.batches_in_queue.remove(batch_number)
-            if batch_number in self.detected_batches:
-                del self.detected_batches[batch_number]
-
-    def _create_event_handler(self):
-        """Creates the logic for handling file system events."""
-        parent = self
-        
-        class Handler(FileSystemEventHandler):
-            def on_created(self, event):
-                if event.is_directory:
-                    return
-                
-                filename = os.path.basename(event.src_path)
-                ext = os.path.splitext(filename)[1].lower()
-
-                if ext not in parent.file_extensions:
-                    return
-
-                batch_number = None
-                inst_code = None
-
-                # Pattern for Excel: e.g., 123456_ABC.xlsx 
-                excel_pattern = rf'(\d{{{parent.batch_length},}})_([A-Z0-9]+)'
-                # Pattern for Images/PDFs: e.g., image_123456.pdf 
-                image_pattern = rf'_(\d{{{parent.batch_length},}})'
-
-                if ext in ['.xlsx', '.xls']:
-                    match = re.search(excel_pattern, filename, re.IGNORECASE)
-                    if match:
-                        batch_number, inst_code = match.group(1), match.group(2)
-                else:
-                    match = re.search(image_pattern, filename)
-                    if match:
-                        batch_number = match.group(1)
-                
-                if not batch_number:
-                    return
-                
-                with parent.lock:
-                    # Ignore if this batch is already being handled in the UI
-                    if batch_number in parent.batches_in_queue:
-                        return
-
-                    if ext in ['.xlsx', '.xls']:
-                        parent.detected_batches[batch_number]['excel'] = event.src_path
-                        parent.detected_batches[batch_number]['institution_code'] = inst_code
-                    else:
-                        parent.detected_batches[batch_number]['images'].append(event.src_path)
-
-                    data = parent.detected_batches[batch_number]
-                    
-                    # Logic: A batch is 'ready' when we have both the Excel manifest AND at least one image/PDF
-                    if data['excel'] and data['images']:
-                        parent.message_queue.put({
-                            'type': 'batch_detected',
-                            'data': {
-                                'batch_number': batch_number,
-                                'institution_code': data['institution_code'],
-                                'files': [data['excel']] + data['images']
-                            }
-                        })
-                        parent.batches_in_queue.add(batch_number)
-
-        return Handler()
+        """
+        Called by main.py when a batch is successfully processed.
+        We leave it in the detected_batches set to prevent the monitor from 
+        re-adding it if the user has 'Keep Files' selected in their Settings tab.
+        """
+        pass

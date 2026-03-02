@@ -1,12 +1,8 @@
-watchdog>=3.0.0 
-pywin32>=306 
-tkcalendar 
-pyminizip 
-babel 
-configparser 
+pywin32>=306
+pyminizip
 pandas
 openpyxl
 xlrd
 xlwt
 PyPDF2
-Pillow
+PyMuPDF

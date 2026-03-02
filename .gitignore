@@ -1,1 +1,15 @@
+# Database and Configs
 file_monitor.db
+local_config.ini
+master_config.ini
+*.db-wal
+*.db-shm
+
+# Python/Build Artifacts
+__pycache__/
+build/
+dist/
+*.spec
+
+# Logs
+*.log

@@ -1,26 +1,57 @@
 import pyminizip
 import os
 import pandas as pd
-from PIL import Image
 from PyPDF2 import PdfReader, PdfWriter
+import fitz  # PyMuPDF for high-quality, standalone PDF to Image conversion
 
-def check_pdf_integrity(file_path):
+def check_file_integrity(file_path):
     """
-    Checks if a PDF is healthy, readable, and not password protected.
+    STEP ZERO: Validates that files aren't corrupted or locked by another user.
+    Returns: (bool, message)
     """
+    if not os.path.exists(file_path) or os.path.getsize(file_path) == 0:
+        return False, "File is missing or 0 bytes."
+
+    ext = os.path.splitext(file_path)[1].lower()
+
+    # 1. OS-Level Lock Check (Checks if the file is open in Excel/Acrobat)
     try:
-        reader = PdfReader(file_path)
-        if reader.is_encrypted:
-            return False, "PDF is password protected."
-        # Attempt to read the first page to confirm file is not corrupt
-        _ = reader.pages[0]
-        return True, "Healthy"
+        # Trying to open in append mode temporarily. Fails if locked by another user.
+        with open(file_path, 'a'):
+            pass
+    except PermissionError:
+        return False, "File is locked. Is it currently open in another program?"
     except Exception as e:
-        return False, f"PDF Integrity Error: {str(e)}"
+        return False, f"OS Lock Check Failed: {str(e)}"
+
+    # 2. Deep PDF Health Check
+    if ext == '.pdf':
+        try:
+            reader = PdfReader(file_path)
+            if reader.is_encrypted:
+                return False, "PDF is password protected. V.O.I.D. cannot process locked files."
+            
+            # Attempt to read the first page to confirm the file is not deeply corrupted
+            _ = reader.pages[0]
+            return True, "Healthy"
+        except Exception as e:
+            return False, f"PDF File Corrupted: {str(e)}"
+
+    # 3. Deep Excel Health Check
+    if ext in ['.xls', '.xlsx']:
+        try:
+            engine = 'xlrd' if ext == '.xls' else 'openpyxl'
+            # Just read the first 2 rows to ensure the headers aren't corrupted
+            pd.read_excel(file_path, engine=engine, nrows=2)
+            return True, "Healthy"
+        except Exception as e:
+            return False, f"Excel File Corrupted: {str(e)}"
+            
+    return True, "Healthy (No deep scan for this extension)"
 
 def split_pdf_pages(file_path, output_dir):
     """
-    Splits a single PDF into individual pages.
+    Recipe: Breaks a multi-page PDF into individual single-page files.
     """
     reader = PdfReader(file_path)
     base_name = os.path.splitext(os.path.basename(file_path))[0]
@@ -29,70 +60,99 @@ def split_pdf_pages(file_path, output_dir):
     for i, page in enumerate(reader.pages):
         writer = PdfWriter()
         writer.add_page(page)
+        
         output_filename = f"{base_name}_page_{i+1}.pdf"
         output_path = os.path.join(output_dir, output_filename)
+        
         with open(output_path, "wb") as f:
             writer.write(f)
         split_files.append(output_path)
     
     return split_files
 
-def convert_pdf_to_tiff_grayscale(pdf_path, output_path):
+def convert_pdf_to_tiff(file_path, output_dir):
     """
-    Converts PDF pages into a single multi-page grayscale TIFF to reduce size.
-    Requires 'pdf2image' or similar, but for portability, we use a robust PIL approach.
+    Recipe: Renders a PDF into high-resolution TIFF images for OCR banking systems.
     """
-    # Note: For strict grayscale TIFF conversion, we assume PDF is converted to images first.
-    # This implementation handles image-to-TIFF for simplicity in portable builds.
-    pass 
+    base_name = os.path.splitext(os.path.basename(file_path))[0]
+    tiff_files = []
+    
+    # Open the document using PyMuPDF
+    doc = fitz.open(file_path)
+    
+    for page_num in range(len(doc)):
+        page = doc.load_page(page_num)
+        
+        # Matrix to increase resolution (Zoom x2 is roughly 144 DPI)
+        zoom_matrix = fitz.Matrix(2, 2)
+        pix = page.get_pixmap(matrix=zoom_matrix, alpha=False)
+        
+        output_filename = f"{base_name}_img_{page_num+1}.tiff"
+        output_path = os.path.join(output_dir, output_filename)
+        
+        # Save directly as image
+        pix.pil_save(output_path, format="TIFF")
+        tiff_files.append(output_path)
+        
+    doc.close()
+    return tiff_files
 
-def transform_excel(file_path, recipe, output_dir):
+def transform_excel(file_path, recipes, output_dir):
     """
-    Handles BSB splitting and version conversions (.xls <-> .xlsx).
+    Recipe Engine: Handles BSB splitting and format upgrades/downgrades.
+    Returns: (new_file_path, record_count)
     """
     filename = os.path.basename(file_path)
-    # Load the data
-    if file_path.lower().endswith('.xls'):
-        df = pd.read_excel(file_path, engine='xlrd')
-    else:
-        df = pd.read_excel(file_path)
+    orig_ext = os.path.splitext(file_path)[1].lower()
+    
+    # 1. Load Data
+    engine = 'xlrd' if orig_ext == '.xls' else 'openpyxl'
+    df = pd.read_excel(file_path, engine=engine)
 
-    # Apply BSB Split Recipe
-    if recipe == 'bsb_split':
-        # Assume Column A (Index 0) is the account string
+    # Calculate exact rows (excluding headers)
+    record_count = len(df)
+
+    # 2. Apply BSB Split if requested
+    if 'bsb_split' in recipes:
         original_col = df.columns[0]
-        df.insert(0, 'BSB', df[original_col].astype(str).str[:6])
-        df.insert(1, '.Account Number', df[original_col].astype(str).str[6:])
+        col_data = df[original_col].astype(str)
+        
+        df.insert(0, 'BSB', col_data.str[:6])
+        df.insert(1, '.Account Number', col_data.str[6:])
         df.drop(columns=[original_col], inplace=True)
 
-    # Determine Output Format
-    new_ext = ".xlsx"
-    if recipe == 'xlsx_to_xls':
-        new_ext = ".xls"
+    # 3. Determine Output Format
+    new_ext = orig_ext  # Default to original unless asked to swap
     
-    new_filename = os.path.splitext(filename)[0] + new_ext
+    if 'xls_to_xlsx' in recipes:
+        new_ext = '.xlsx'
+    elif 'xlsx_to_xls' in recipes:
+        new_ext = '.xls'
+        
+    new_filename = os.path.splitext(filename)[0] + "_processed" + new_ext
     save_path = os.path.join(output_dir, new_filename)
     
+    # 4. Save Transformed File
     if new_ext == ".xls":
         df.to_excel(save_path, index=False, engine='xlwt')
     else:
-        df.to_excel(save_path, index=False)
+        df.to_excel(save_path, index=False, engine='openpyxl')
         
-    return save_path, len(df)
+    return save_path, record_count
 
-def zip_files_with_password(file_paths, zip_path, password):
+def zip_files_with_password(file_paths, zip_path, password, batch_name=""):
     """
-    Creates a password-protected zip file using pyminizip.
+    The Vault: Compresses and encrypts files.
     """
     prefixes = ["" for _ in file_paths]
-    compression_level = 0
+    compression_level = 0  # Standard compression
     
     try:
         for p in file_paths:
             if not os.path.exists(p):
-                raise FileNotFoundError(f"Missing file: {os.path.basename(p)}")
+                raise FileNotFoundError(f"Missing file for zipping: {os.path.basename(p)}")
 
-        pyminizip.compress_multiple(file_paths, prefixes, zip_path, password, compression_level) [cite: 5]
+        pyminizip.compress_multiple(file_paths, prefixes, zip_path, password, compression_level)
         return True
     except Exception as e:
         raise Exception(f"Encryption Error: {str(e)}")
