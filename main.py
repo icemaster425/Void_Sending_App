@@ -51,6 +51,14 @@ class FileMonitorApp:
         self.monitoring = False
         self.message_queue = queue.Queue()
         
+        self.file_monitor = None
+        self.monitoring = False
+        self.message_queue = queue.Queue()
+        
+        # --- ADD THESE TWO LINES SO IT NEVER CRASHES ---
+        self.file_extensions = ['.xlsx', '.xls', '.pdf']
+        self.batch_length = 6
+        
         # Load the network resources if the local config has them
         self.connect_to_master()
         

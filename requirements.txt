@@ -6,3 +6,4 @@ xlrd
 xlwt
 PyPDF2
 PyMuPDF
+Pillow
