@@ -10,7 +10,7 @@ class FileMonitor(threading.Thread):
         self.db_manager = db_manager
         self.message_queue = message_queue
         
-        # Ensures all extensions from config are lowercase and stripped of spaces for accurate matching
+        # Ensures all extensions from config are lowercase and stripped of spaces
         self.file_extensions = [ext.strip().lower() for ext in file_extensions]
         
         # Ensures batch length is treated as an integer
@@ -36,7 +36,7 @@ class FileMonitor(threading.Thread):
 
         current_batches = {}
 
-        # Scan all files in the directory
+        # STEP 1: Scan all files and group them by Batch Number
         for filename in os.listdir(self.folder_path):
             file_path = os.path.join(self.folder_path, filename)
             
@@ -49,40 +49,63 @@ class FileMonitor(threading.Thread):
             if ext not in self.file_extensions:
                 continue
 
-            # Standardized Regex matcher for V.O.I.D. filenames
-            # Looks for: [Letters/Numbers]_[Numbers]
-            # Example: CBA_123456_accounts.xlsx -> Inst: CBA, Batch: 123456
-            match = re.match(r'^([A-Za-z0-9]+)_(\d+)', filename)
-            
-            if match:
-                inst_code = match.group(1).upper()
-                batch_num = match.group(2)
-                
-                # Group files under the same batch number
+            inst_code = "PENDING"
+            batch_num = None
+
+            # RULE 1: Excel Files (BatchNumber_InstitutionCode.ext)
+            # Example: 220593_ANZ.xlsx -> Batch: 220593, Code: ANZ
+            if ext in ['.xls', '.xlsx']:
+                match = re.match(r'^(\d+)_([A-Za-z0-9]+)', filename)
+                if match:
+                    batch_num = match.group(1)
+                    inst_code = match.group(2).upper()
+
+            # RULE 2: PDF Files (Date_BatchNumber.pdf)
+            # Example: 20052025_220593.pdf -> Date: 20052025, Batch: 220593
+            elif ext == '.pdf':
+                match = re.match(r'^(\d+)_(\d+)', filename)
+                if match:
+                    # Group 2 is the batch number for PDFs based on your naming convention
+                    batch_num = match.group(2)
+                    inst_code = "PENDING"
+
+            # Grouping Logic: Add the file to the correct Batch dictionary
+            if batch_num:
                 if batch_num not in current_batches:
                     current_batches[batch_num] = {
                         'institution_code': inst_code,
                         'batch_number': batch_num,
                         'files': []
                     }
+                
                 current_batches[batch_num]['files'].append(file_path)
+                
+                # If this file gave us the real Institution Code (from an Excel file), 
+                # update the whole group so any PDFs in this batch know who they belong to.
+                if inst_code != "PENDING":
+                    current_batches[batch_num]['institution_code'] = inst_code
 
-        # Push newly completed batches to the GUI
-        for batch_num, batch_data in current_batches.items():
-            if batch_num not in self.detected_batches:
-                self.detected_batches.add(batch_num)
+        # STEP 2: Push completed batches to the GUI
+        for b_num, data in current_batches.items():
+            # We cannot process a batch if we don't know the Institution Code yet
+            # (e.g., if only the PDF has arrived in the folder so far)
+            if data['institution_code'] == "PENDING":
+                continue
+
+            if b_num not in self.detected_batches:
+                self.detected_batches.add(b_num)
                 
                 # Send the batch data to populate the UI panel
                 self.message_queue.put({
                     'type': 'batch_detected',
-                    'data': batch_data
+                    'data': data
                 })
                 
                 # Log the detection in the activity feed
-                file_count = len(batch_data['files'])
+                file_count = len(data['files'])
                 self.message_queue.put({
                     'type': 'activity',
-                    'data': f"Detected: {batch_data['institution_code']} Batch {batch_num} ({file_count} files)"
+                    'data': f"Detected: {data['institution_code']} Batch {b_num} ({file_count} files)"
                 })
 
     def stop(self):
