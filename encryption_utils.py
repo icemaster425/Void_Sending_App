@@ -99,7 +99,7 @@ def convert_pdf_to_tiff(file_path, output_dir):
 
 def transform_excel(file_path, recipes, output_dir):
     """
-    Recipe Engine: Handles BSB/Farm splitting, CSV exports, and format swaps.
+    Recipe Engine: Handles BSB splitting and format upgrades/downgrades.
     Returns: (new_file_path, record_count)
     """
     filename = os.path.basename(file_path)
@@ -112,22 +112,13 @@ def transform_excel(file_path, recipes, output_dir):
     # Calculate exact rows (excluding headers)
     record_count = len(df)
 
-    # 2. Apply Column Splits if requested
+    # 2. Apply BSB Split if requested
     if 'bsb_split' in recipes:
         original_col = df.columns[0]
         col_data = df[original_col].astype(str)
         
         df.insert(0, 'BSB', col_data.str[:6])
         df.insert(1, '.Account Number', col_data.str[6:])
-        df.drop(columns=[original_col], inplace=True)
-
-    if 'farm_split' in recipes:
-        original_col = df.columns[0]
-        col_data = df[original_col].astype(str)
-        
-        # Slices the first 5 digits for the Farm, the rest for the Party
-        df.insert(0, 'Farm Number', col_data.str[:5])
-        df.insert(1, 'Party Number', col_data.str[5:])
         df.drop(columns=[original_col], inplace=True)
 
     # 3. Determine Output Format
@@ -137,8 +128,6 @@ def transform_excel(file_path, recipes, output_dir):
         new_ext = '.xlsx'
     elif 'xlsx_to_xls' in recipes:
         new_ext = '.xls'
-    elif 'xlsx_to_csv' in recipes or 'xls_to_csv' in recipes:
-        new_ext = '.csv'
         
     new_filename = os.path.splitext(filename)[0] + "_processed" + new_ext
     save_path = os.path.join(output_dir, new_filename)
@@ -146,8 +135,6 @@ def transform_excel(file_path, recipes, output_dir):
     # 4. Save Transformed File
     if new_ext == ".xls":
         df.to_excel(save_path, index=False, engine='xlwt')
-    elif new_ext == ".csv":
-        df.to_csv(save_path, index=False)
     else:
         df.to_excel(save_path, index=False, engine='openpyxl')
         
