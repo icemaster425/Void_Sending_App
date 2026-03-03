@@ -16,9 +16,8 @@ pip install -r requirements.txt
 pip install pyinstaller
 
 :: 3. Run the PyInstaller command
-:: Note: We include --hidden-import "fitz" for the new PDF engine
 echo [3/4] Compiling VOID_System.exe...
-pyinstaller --noconsole --onefile --icon="void_icon.ico" --name "VOID_System" ^
+pyinstaller --noconsole --onefile --icon="New_void_icon.ico" --name "VOID_System" ^
 --hidden-import "pandas" ^
 --hidden-import "openpyxl" ^
 --hidden-import "xlrd" ^
@@ -26,6 +25,7 @@ pyinstaller --noconsole --onefile --icon="void_icon.ico" --name "VOID_System" ^
 --hidden-import "PyPDF2" ^
 --hidden-import "win32com" ^
 --hidden-import "fitz" ^
+--hidden-import "PIL" ^
 main.py
 
 :: 4. Finalizing
