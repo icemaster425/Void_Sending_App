@@ -24,10 +24,10 @@ jobs:
         pip install -r requirements.txt
         pip install pyinstaller
 
-- name: Build with PyInstaller
+    - name: Build with PyInstaller
       run: pyinstaller --noconsole --onefile --icon="New_void_icon.ico" --name "VOID_System" --hidden-import "pandas" --hidden-import "openpyxl" --hidden-import "xlrd" --hidden-import "xlwt" --hidden-import "PyPDF2" --hidden-import "win32com" --hidden-import "fitz" --hidden-import "PIL" main.py
 
-      - name: Upload Executable
+    - name: Upload Executable
       uses: actions/upload-artifact@v4
       with:
         name: VOID-Portable-EXE
