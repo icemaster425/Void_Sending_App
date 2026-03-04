@@ -8,10 +8,8 @@ class MainWindow:
         self.root = root
         self.app = app_controller
         
-        # 1. Startup User Selection
-        self.current_user = self.select_user_startup()
-        
-        # We will set the title dynamically in main.py, but this is a fallback
+        # 1. Set a temporary title. The popup will update this in a split second.
+        self.current_user = "Pending..."
         self.root.title(f"V.O.I.D. - Verified On-boarding Institutional Dispatcher [User: {self.current_user}]")
         
         self.setup_styles()
@@ -40,10 +38,12 @@ class MainWindow:
         except Exception:
             pass # Fails silently on first run until paths are set in Settings
 
-    def select_user_startup(self):
-        """Pops up a modal selection window for the dispatcher name at startup."""
-        staff_fallback = "Dony, Sminu, Nathanael, Mikhael"
-        # Safely attempt to get the staff list if config is loaded, otherwise use fallback
+        # --- THE FIX: Wait 200ms after the main app is drawn, THEN show the popup ---
+        self.root.after(200, self.show_login_popup)
+
+    def show_login_popup(self):
+        """Pops up a modal selection window for the dispatcher name."""
+        staff_fallback = "Dianne, Dony, Natasha, Nes, Ricci, Lynda, Maria, Michaela"
         try:
             staff_str = self.app.master_config.get('SHARED_SETTINGS', 'staff_list', fallback=staff_fallback)
         except AttributeError:
@@ -51,33 +51,60 @@ class MainWindow:
             
         staff_list = [s.strip() for s in staff_str.split(',')]
         
+        # --- NEW: Retrieve the last used dispatcher from local settings ---
+        last_user = self.app.local_config.get('PREFS', 'last_user', fallback="") if self.app.local_config.has_section('PREFS') else ""
+        default_user = last_user if last_user in staff_list else staff_list[0]
+        # ------------------------------------------------------------------
+        
         win = tk.Toplevel(self.root)
         win.title("V.O.I.D. Login")
         win.geometry("300x150")
         win.resizable(False, False)
-        win.grab_set() 
+        
+        # Force it on top of the ALREADY DRAWN main window
+        win.transient(self.root)          
+        win.attributes('-topmost', True)  
         
         win.update_idletasks()
         x = (win.winfo_screenwidth() // 2) - (win.winfo_width() // 2)
         y = (win.winfo_screenheight() // 2) - (win.winfo_height() // 2)
         win.geometry(f'+{x}+{y}')
 
-        ttk.Label(win, text="Who is dispatching today?", font=("Helvetica", 11, "bold")).pack(pady=15)
+        tk.Label(win, text="Who is dispatching today?", font=("Helvetica", 11, "bold"), bg=win.cget("bg")).pack(pady=15)
         
-        user_var = tk.StringVar(value=staff_list[0])
+        # --- NEW: Set the dropdown to the default user ---
+        user_var = tk.StringVar(value=default_user)
         combo = ttk.Combobox(win, textvariable=user_var, values=staff_list, state="readonly", font=("Helvetica", 10))
         combo.pack(pady=5, padx=30, fill=tk.X)
         
-        selected_user = [staff_list[0]] 
-        
         def on_confirm():
-            selected_user[0] = user_var.get()
+            selected_name = user_var.get()
+            
+            # Update the user and instantly refresh the main app's title bar!
+            self.current_user = selected_name
+            self.root.title(f"V.O.I.D. - Verified On-boarding Institutional Dispatcher [User: {self.current_user}]")
+            
+            # --- NEW: Save this selection locally for next time ---
+            if not self.app.local_config.has_section('PREFS'):
+                self.app.local_config.add_section('PREFS')
+            self.app.local_config.set('PREFS', 'last_user', selected_name)
+            try:
+                with open(self.app.local_config_path, 'w') as f:
+                    self.app.local_config.write(f)
+            except Exception:
+                pass # Fail silently if we can't save the preference, it's just a convenience feature
+            # ------------------------------------------------------
+            
             win.destroy()
             
         ttk.Button(win, text="Start System", command=on_confirm).pack(pady=15)
-        win.protocol("WM_DELETE_WINDOW", lambda: self.root.destroy())
-        self.root.wait_window(win)
-        return selected_user[0]
+        
+        # If they close the login window with the 'X', close the whole app
+        win.protocol("WM_DELETE_WINDOW", lambda: self.root.destroy()) 
+        
+        # Grab all mouse/keyboard clicks so the user MUST log in before clicking the main app
+        win.grab_set()
+        win.focus_force()
 
     def setup_styles(self):
         self.style = ttk.Style()
@@ -150,11 +177,12 @@ class MainWindow:
 
     def autofit_columns(self):
         padding = 20
+        measure_font = font.Font() 
         for col in self.processed_tree["columns"]:
-            max_w = font.Font().measure(self.processed_tree.heading(col)['text']) + padding
+            max_w = measure_font.measure(self.processed_tree.heading(col)['text']) + padding
             for item in self.processed_tree.get_children():
                 cell_val = str(self.processed_tree.set(item, col))
-                cell_w = font.Font().measure(cell_val) + padding
+                cell_w = measure_font.measure(cell_val) + padding
                 if cell_w > max_w:
                     max_w = cell_w
             self.processed_tree.column(col, width=max_w)
@@ -187,7 +215,8 @@ class MainWindow:
         tree_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(10, 5))
         
         self.institutions_tree = ttk.Treeview(tree_frame, columns=("c_code", "i_code", "email", "key", "msg"), show="headings", selectmode="extended")
-        headings = ["County Code", "Inst Code", "Email", "Password", "Message"]
+        # --- TWEAK 1: Renamed "County Code" to "Country Code" ---
+        headings = ["Country Code", "Inst Code", "Email", "Password", "Message"]
         for col, text in zip(self.institutions_tree["columns"], headings):
             self.institutions_tree.heading(col, text=text)
         self.institutions_tree.pack(fill=tk.BOTH, expand=True)
@@ -211,7 +240,8 @@ class MainWindow:
             'key': tk.StringVar()
         }
         
-        ttk.Label(self.quick_edit_frame, text="County:").grid(row=0, column=0, padx=5, pady=2, sticky=tk.W)
+        # --- TWEAK 1: Renamed label to "Country" ---
+        ttk.Label(self.quick_edit_frame, text="Country:").grid(row=0, column=0, padx=5, pady=2, sticky=tk.W)
         self.qe_c_code = ttk.Entry(self.quick_edit_frame, textvariable=self.qe_vars['c_code'], width=15)
         self.qe_c_code.grid(row=0, column=1, padx=5, pady=2)
         
@@ -281,7 +311,8 @@ class MainWindow:
     def add_institution(self):
         win = tk.Toplevel(self.root)
         win.title("Add New Institution")
-        fields = ["County Code:", "Institution Code:", "Email:", "Encryption Key:", "Message:"]
+        # --- TWEAK 1: Renamed "County Code" to "Country Code" ---
+        fields = ["Country Code:", "Institution Code:", "Email:", "Encryption Key:", "Message:"]
         ents = {}
         for i, f in enumerate(fields):
             ttk.Label(win, text=f).grid(row=i, column=0, padx=10, pady=5, sticky=tk.NW)
@@ -294,7 +325,7 @@ class MainWindow:
             ents[f] = ent
         def save():
             msg = ents["Message:"].get("1.0", tk.END).strip()
-            self.app.db_manager.add_institution(ents["County Code:"].get(), ents["Institution Code:"].get(), ents["Email:"].get(), ents["Encryption Key:"].get(), msg)
+            self.app.db_manager.add_institution(ents["Country Code:"].get(), ents["Institution Code:"].get(), ents["Email:"].get(), ents["Encryption Key:"].get(), msg)
             self.load_institutions()
             win.destroy()
         ttk.Button(win, text="Save", style="Add.Glossy.TButton", command=save).grid(row=len(fields), column=0, columnspan=2, pady=10)
@@ -306,7 +337,8 @@ class MainWindow:
         data = self.app.db_manager.get_institution_by_code(code)
         win = tk.Toplevel(self.root)
         win.title(f"Edit: {code}")
-        fields = ["County Code:", "Institution Code:", "Email:", "Encryption Key:", "Message:"]
+        # --- TWEAK 1: Renamed "County Code" to "Country Code" ---
+        fields = ["Country Code:", "Institution Code:", "Email:", "Encryption Key:", "Message:"]
         ents = {}
         for i, f in enumerate(fields):
             ttk.Label(win, text=f).grid(row=i, column=0, padx=10, pady=5, sticky=tk.NW)
@@ -316,12 +348,12 @@ class MainWindow:
                 ent.grid(row=i, column=1, padx=10, pady=5)
             else:
                 ent = ttk.Entry(win, width=50)
-                key_map = {"County Code:": 'county_code', "Institution Code:": 'institution_code', "Email:": 'email', "Encryption Key:": 'encryption_key'}
+                key_map = {"Country Code:": 'county_code', "Institution Code:": 'institution_code', "Email:": 'email', "Encryption Key:": 'encryption_key'}
                 ent.insert(0, data.get(key_map[f], ''))
                 ent.grid(row=i, column=1, padx=10, pady=5)
             ents[f] = ent
         def save():
-            up_data = {'county_code': ents["County Code:"].get(), 'institution_code': ents["Institution Code:"].get(), 'email': ents["Email:"].get(), 'encryption_key': ents["Encryption Key:"].get(), 'message': ents["Message:"].get("1.0", tk.END).strip()}
+            up_data = {'county_code': ents["Country Code:"].get(), 'institution_code': ents["Institution Code:"].get(), 'email': ents["Email:"].get(), 'encryption_key': ents["Encryption Key:"].get(), 'message': ents["Message:"].get("1.0", tk.END).strip()}
             self.app.db_manager.update_institution(code, up_data)
             self.load_institutions()
             win.destroy()
@@ -367,7 +399,7 @@ class MainWindow:
                 self.app.db_manager.delete_institution(self.institutions_tree.item(item, 'values')[1])
             self.load_institutions()
 
-    # --- NEW SETTINGS TAB IMPLEMENTATION ---
+    # --- SETTINGS TAB IMPLEMENTATION ---
     def setup_settings_tab(self, parent_frame):
         main_container = ttk.Frame(parent_frame, padding="10")
         main_container.pack(fill=tk.BOTH, expand=True)
@@ -487,9 +519,24 @@ class MainWindow:
             var = tk.BooleanVar(value=True)
             bd['file_vars'][file] = var
             ttk.Checkbutton(panel, text=os.path.basename(file), variable=var).pack(anchor='w', padx=15)
-        ttk.Button(panel, text="Create Draft", style="Edit.Glossy.TButton", command=lambda b=bd: self.app.process_batch(b)).pack(pady=5)
+            
+        # --- TWEAK 2: Added a Frame for Side-by-Side Buttons ---
+        btn_frame = ttk.Frame(panel)
+        btn_frame.pack(pady=5)
+        
+        ttk.Button(btn_frame, text="Create Draft", style="Edit.Glossy.TButton", command=lambda b=bd: self.app.process_batch(b)).pack(side=tk.LEFT, padx=5)
+        
+        # --- TWEAK 2: New 'Close Without Drafting' button ---
+        ttk.Button(btn_frame, text="Close Without Drafting", style="Delete.Glossy.TButton", command=lambda bn=bd['batch_number']: self.cancel_batch_processing(bn)).pack(side=tk.LEFT, padx=5)
+        
         self.batch_panels[bd['batch_number']] = panel
         self.batches_canvas.config(scrollregion=self.batches_canvas.bbox("all"))
+
+    # --- TWEAK 2: The Logic to cancel and clear the panel ---
+    def cancel_batch_processing(self, batch_number):
+        if messagebox.askyesno("Cancel", "Discard this detected batch without creating drafts?"):
+            self.remove_batch_panel(batch_number)
+            self.log_activity(f"Batch {batch_number} processing cancelled by user.")
 
     def remove_batch_panel(self, bn):
         if bn in self.batch_panels:
