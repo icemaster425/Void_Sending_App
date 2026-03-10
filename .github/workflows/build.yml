@@ -25,7 +25,7 @@ jobs:
         pip install pyinstaller
 
     - name: Build with PyInstaller
-      run: pyinstaller --noconsole --onefile --icon="New_void_icon.ico" --name "VOID_System" --hidden-import "pandas" --hidden-import "openpyxl" --hidden-import "xlrd" --hidden-import "xlwt" --hidden-import "PyPDF2" --hidden-import "win32com" --hidden-import "fitz" --hidden-import "PIL" main.py
+      run: pyinstaller --noconsole --onefile --icon="New_void_icon.ico" --name "VOID_System" --collect-submodules xlwt --hidden-import "xlwt" --hidden-import "pandas" --hidden-import "openpyxl" --hidden-import "xlrd" --hidden-import "PyPDF2" --hidden-import "win32com" --hidden-import "pythoncom" --hidden-import "fitz" --hidden-import "PIL" main.py
 
     - name: Upload Executable
       uses: actions/upload-artifact@v4

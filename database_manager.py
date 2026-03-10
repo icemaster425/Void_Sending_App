@@ -1,5 +1,6 @@
 import sqlite3
 import os
+import time
 from datetime import datetime
 
 class DatabaseManager:
@@ -13,20 +14,39 @@ class DatabaseManager:
 
     def _get_connection(self):
         """
-        Creates a connection with WAL mode enabled for concurrent network access.
-        Timeout of 15 seconds prevents locking crashes if someone else is saving data.
+        Creates a connection with WAL mode enabled.
+        Timeout increased to 30s for slow network drive resilience.
         """
-        conn = sqlite3.connect(self.db_path, timeout=15.0)
+        conn = sqlite3.connect(self.db_path, timeout=30.0)
         conn.execute("PRAGMA journal_mode=WAL;")
+        conn.execute("PRAGMA synchronous=NORMAL;")
         return conn
+
+    def _retry_execute(self, query, params=(), commit=False):
+        """High-IQ Network Resilience: Retries on database locks."""
+        for attempt in range(5):
+            try:
+                conn = self._get_connection()
+                cursor = conn.cursor()
+                cursor.execute(query, params)
+                
+                if commit:
+                    conn.commit()
+                    res = cursor.lastrowid
+                else:
+                    res = cursor.fetchall()
+                    
+                conn.close()
+                return res
+            except sqlite3.OperationalError as e:
+                if "locked" in str(e).lower() and attempt < 4:
+                    time.sleep(1 + attempt) # Incremental backoff
+                    continue
+                raise e
 
     def init_database(self):
         """Creates tables and automatically adds missing columns if an older DB is detected."""
-        conn = self._get_connection()
-        cursor = conn.cursor()
-        
-        # 1. Base Tables
-        cursor.execute('''
+        self._retry_execute('''
             CREATE TABLE IF NOT EXISTS institutions (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 county_code TEXT,
@@ -37,9 +57,9 @@ class DatabaseManager:
                 created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
                 updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
             )
-        ''')
+        ''', commit=True)
         
-        cursor.execute('''
+        self._retry_execute('''
             CREATE TABLE IF NOT EXISTS email_log (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 institution_code TEXT NOT NULL,
@@ -52,9 +72,11 @@ class DatabaseManager:
                 sent_time TEXT,
                 FOREIGN KEY (institution_code) REFERENCES institutions (institution_code)
             )
-        ''')
+        ''', commit=True)
 
-        # 2. Smart Auto-Migration Logic (Safely adds new columns without crashing)
+        # Smart Auto-Migration Logic
+        conn = self._get_connection()
+        cursor = conn.cursor()
         cursor.execute("PRAGMA table_info(email_log)")
         columns = [column[1] for column in cursor.fetchall()]
         
@@ -68,106 +90,59 @@ class DatabaseManager:
         conn.close()
 
     def add_sent_email(self, institution_code, batch_number, recipient_email, subject, attachment_type, attachment_files, dispatcher_name="Unknown", record_count=0):
-        """Logs a successful dispatch into the shared history."""
-        conn = self._get_connection()
-        cursor = conn.cursor()
-        
-        # Enforcing the strictly requested DD/MM/YYYY format
         sent_date = datetime.now().strftime('%d/%m/%Y')
         sent_time = datetime.now().strftime('%H:%M:%S')
         files_string = ', '.join(os.path.basename(f) for f in attachment_files)
         
-        cursor.execute('''
+        self._retry_execute('''
             INSERT INTO email_log (institution_code, batch_number, recipient_email, subject, attachment_type, attachment_files, sent_date, sent_time, dispatcher_name, record_count)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (institution_code, batch_number, recipient_email, subject, attachment_type, files_string, sent_date, sent_time, dispatcher_name, record_count))
-        
-        conn.commit()
-        conn.close()
+        ''', (institution_code, batch_number, recipient_email, subject, attachment_type, files_string, sent_date, sent_time, dispatcher_name, record_count), commit=True)
 
     def get_sent_emails(self):
-        conn = self._get_connection()
-        cursor = conn.cursor()
-        # Sorting by ID descending ensures chronological order even with text-based dates
-        cursor.execute('''
+        return self._retry_execute('''
             SELECT institution_code, batch_number, sent_date, sent_time, attachment_files, dispatcher_name, record_count 
             FROM email_log 
             ORDER BY id DESC
         ''')
-        results = cursor.fetchall()
-        conn.close()
-        return results
 
     def get_sent_emails_by_date(self, date_str):
-        """Retrieves history for a specific date (DD/MM/YYYY)."""
-        conn = self._get_connection()
-        cursor = conn.cursor()
-        cursor.execute('''
+        return self._retry_execute('''
             SELECT institution_code, batch_number, sent_date, sent_time, attachment_files, dispatcher_name, record_count 
             FROM email_log 
             WHERE sent_date = ? 
             ORDER BY id DESC
         ''', (date_str,))
-        results = cursor.fetchall()
-        conn.close()
-        return results
 
     def search_sent_emails(self, search_term):
-        """Searches by Batch Number, Institution Code, or Date."""
-        conn = self._get_connection()
-        cursor = conn.cursor()
         term = f'%{search_term}%'
-        cursor.execute('''
+        return self._retry_execute('''
             SELECT institution_code, batch_number, sent_date, sent_time, attachment_files, dispatcher_name, record_count 
             FROM email_log 
             WHERE batch_number LIKE ? OR institution_code LIKE ? OR sent_date LIKE ?
             ORDER BY id DESC
         ''', (term, term, term))
-        results = cursor.fetchall()
-        conn.close()
-        return results
-
-    # --- Institution Data Methods ---
 
     def get_all_institutions(self):
-        conn = self._get_connection()
-        cursor = conn.cursor()
-        cursor.execute('SELECT county_code, institution_code, email, encryption_key, message FROM institutions ORDER BY institution_code')
-        rows = cursor.fetchall()
-        conn.close()
-        return rows
+        return self._retry_execute('SELECT county_code, institution_code, email, encryption_key, message FROM institutions ORDER BY institution_code')
 
     def get_institution_by_code(self, institution_code):
-        conn = self._get_connection()
-        cursor = conn.cursor()
-        cursor.execute('SELECT * FROM institutions WHERE institution_code = ?', (institution_code,))
-        row = cursor.fetchone()
-        conn.close()
-        if row:
+        results = self._retry_execute('SELECT * FROM institutions WHERE institution_code = ?', (institution_code,))
+        if results:
+            row = results[0]
             return {'county_code': row[1], 'institution_code': row[2], 'email': row[3], 'encryption_key': row[4], 'message': row[5]}
         return None
 
     def add_institution(self, county_code, institution_code, email, encryption_key, message):
-        conn = self._get_connection()
-        cursor = conn.cursor()
-        cursor.execute('INSERT INTO institutions (county_code, institution_code, email, encryption_key, message) VALUES (?, ?, ?, ?, ?)', (county_code, institution_code, email, encryption_key, message))
-        conn.commit()
-        conn.close()
+        self._retry_execute('INSERT INTO institutions (county_code, institution_code, email, encryption_key, message) VALUES (?, ?, ?, ?, ?)', 
+                            (county_code, institution_code, email, encryption_key, message), commit=True)
 
     def update_institution(self, old_code, updated_data):
-        conn = self._get_connection()
-        cursor = conn.cursor()
-        cursor.execute('''
+        self._retry_execute('''
             UPDATE institutions
             SET county_code = ?, institution_code = ?, email = ?, encryption_key = ?, message = ?, updated_at = CURRENT_TIMESTAMP
             WHERE institution_code = ?
-        ''', (updated_data['county_code'], updated_data['institution_code'], updated_data['email'], updated_data['encryption_key'], updated_data['message'], old_code))
-        conn.commit()
-        conn.close()
+        ''', (updated_data['county_code'], updated_data['institution_code'], updated_data['email'], updated_data['encryption_key'], updated_data['message'], old_code), commit=True)
 
     def delete_institution(self, institution_code):
-        conn = self._get_connection()
-        cursor = conn.cursor()
-        cursor.execute('DELETE FROM institutions WHERE institution_code = ?', (institution_code,))
-        conn.commit()
-        conn.close()
+        self._retry_execute('DELETE FROM institutions WHERE institution_code = ?', (institution_code,), commit=True)

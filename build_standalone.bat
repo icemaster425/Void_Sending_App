@@ -18,12 +18,14 @@ pip install pyinstaller
 :: 3. Run the PyInstaller command
 echo [3/4] Compiling VOID_System.exe...
 pyinstaller --noconsole --onefile --icon="New_void_icon.ico" --name "VOID_System" ^
+--collect-submodules xlwt ^
+--hidden-import "xlwt" ^
 --hidden-import "pandas" ^
 --hidden-import "openpyxl" ^
 --hidden-import "xlrd" ^
---hidden-import "xlwt" ^
 --hidden-import "PyPDF2" ^
 --hidden-import "win32com" ^
+--hidden-import "pythoncom" ^
 --hidden-import "fitz" ^
 --hidden-import "PIL" ^
 main.py
