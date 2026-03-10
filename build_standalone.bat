@@ -1,6 +1,6 @@
 @echo off
 echo ========================================================
-echo   V.O.I.D. Local Compiler - Standalone EXE Generator
+echo   VOID- Sending App Local Compiler
 echo ========================================================
 echo.
 
@@ -8,7 +8,7 @@ echo.
 echo [1/4] Cleaning old build files...
 if exist dist del /q dist\*.*
 if exist build rd /s /q build
-if exist VOID_System.spec del /q VOID_System.spec
+if exist "VOID- Sending App.spec" del /q "VOID- Sending App.spec"
 
 :: 2. Ensure all required libraries are installed locally
 echo [2/4] Verifying dependencies...
@@ -16,8 +16,8 @@ pip install -r requirements.txt
 pip install pyinstaller
 
 :: 3. Run the PyInstaller command
-echo [3/4] Compiling VOID_System.exe...
-pyinstaller --noconsole --onefile --icon="New_void_icon.ico" --name "VOID_System" ^
+echo [3/4] Compiling VOID- Sending App.exe...
+pyinstaller --noconsole --onefile --icon="New_void_icon.ico" --name "VOID- Sending App" ^
 --collect-submodules xlwt ^
 --hidden-import "xlwt" ^
 --hidden-import "pandas" ^
