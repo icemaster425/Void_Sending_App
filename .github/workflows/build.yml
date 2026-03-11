@@ -1,4 +1,4 @@
-name: Build RIP Portable
+name: Build VOID Portable
 
 on:
   push:
@@ -21,14 +21,14 @@ jobs:
     - name: Install Dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install pandas PyQt5 openpyxl watchdog pyinstaller xlrd xlwt xlsxwriter
+        pip install pandas PyQt5 openpyxl watchdog pyinstaller xlrd xlwt xlsxwriter pywin32
 
-    - name: Build with PyInstaller
+    - name: Build VOID Executable
       run: |
-        pyinstaller --noconsole --onefile --icon="fact.ico" --name "RIP-Checking App" --hidden-import "pandas" --hidden-import "openpyxl" --hidden-import "xlrd" --hidden-import "xlwt" --hidden-import "xlsxwriter" --hidden-import "engine" main.py
+        pyinstaller --noconsole --onefile --icon="New_void_icon.ico" --name="VOID-App" --hidden-import=pandas --hidden-import=openpyxl --hidden-import=xlrd --hidden-import=xlwt --hidden-import=xlsxwriter --hidden-import=engine --hidden-import=win32com --hidden-import=win32com.client main.py
 
-    - name: Upload EXE Artifact
+    - name: Upload VOID Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: RIP-Checking-App-Portable
-        path: dist/RIP-Checking App.exe
+        name: VOID-Portable-Payload
+        path: dist/VOID-App.exe
