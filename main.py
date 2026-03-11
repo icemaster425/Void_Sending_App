@@ -4,7 +4,6 @@ import os
 import sys
 import queue
 import logging
-import xlwt
 import shutil
 from datetime import datetime
 from configparser import ConfigParser
