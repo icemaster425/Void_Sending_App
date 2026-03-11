@@ -42,7 +42,7 @@ class FileMonitorApp:
         self.root.title("V.O.I.D. - Initializing...")
         self.root.geometry("1200x800")
         
-        # 3. Initialize Shared Resources (Will be None if paths aren't set yet)
+        # 3. Initialize Shared Resources
         self.db_manager = None
         self.master_config = None
         self.outlook_integration = OutlookIntegration()
@@ -51,22 +51,14 @@ class FileMonitorApp:
         self.monitoring = False
         self.message_queue = queue.Queue()
         
-        self.file_monitor = None
-        self.monitoring = False
-        self.message_queue = queue.Queue()
-        
-        # --- ADD THESE TWO LINES SO IT NEVER CRASHES ---
         self.file_extensions = ['.xlsx', '.xls', '.pdf']
         self.batch_length = 6
         
-        # Load the network resources if the local config has them
         self.connect_to_master()
         
-        # Initialize UI
         self.gui = MainWindow(self.root, self)
         self.gui.folder_path_entry.insert(0, self.default_monitor_path)
         
-        # Update UI connection status if successful on startup
         if self.db_manager and self.master_config:
             self.gui.status_lbl.config(text="Status: Connected to Master Storage", foreground="green")
             self.gui.load_institutions()
@@ -91,7 +83,6 @@ class FileMonitorApp:
         return config
 
     def save_local_settings(self, settings_data):
-        """Called by the UI to save network paths and user preferences."""
         if not self.local_config.has_section('PATHS'):
             self.local_config.add_section('PATHS')
         if not self.local_config.has_section('PREFS'):
@@ -108,7 +99,6 @@ class FileMonitorApp:
         return self.connect_to_master()
 
     def connect_to_master(self):
-        """Attempts to load the Master Database and Master Config from the S: drive."""
         db_path = self.local_config.get('PATHS', 'db_path', fallback='')
         cfg_path = self.local_config.get('PATHS', 'master_config_path', fallback='')
         
@@ -120,11 +110,9 @@ class FileMonitorApp:
             self.master_config = ConfigParser()
             self.master_config.read(cfg_path)
             
-            # Read dynamic settings from Master
             self.file_extensions = self.master_config.get('MONITORING', 'file_extensions', fallback='.xlsx,.xls,.pdf').split(',')
             self.batch_length = self.master_config.get('MONITORING', 'batch_length', fallback='6')
             
-            # Update UI Trees if the GUI is already loaded
             if hasattr(self, 'gui'):
                 self.gui.load_institutions()
                 self.gui.load_processed_batches()
@@ -172,13 +160,11 @@ class FileMonitorApp:
         record_count = 0
 
         try:
-            # STEP 0: Integrity Check
             for f in raw_files:
                 healthy, msg = check_file_integrity(f)
                 if not healthy:
                     raise Exception(f"Integrity Error in {os.path.basename(f)}: {msg}")
 
-            # STEP 1 & 2: Apply Transformations & Counting Recipes
             for f in raw_files:
                 ext = os.path.splitext(f)[1].lower()
                 
@@ -195,8 +181,8 @@ class FileMonitorApp:
                         continue
 
                 if ext in ['.xls', '.xlsx']:
-                    # Passes the recipes to the engine to handle BSB splits and format swaps
-                    new_path, rows = transform_excel(f, recipes, self.base_dir)
+                    # THE FIX: Argument order is now corrected
+                    new_path, rows = transform_excel(f, self.base_dir, recipes)
                     processed_files.append(new_path)
                     temp_files.append(new_path)
                     
@@ -204,21 +190,17 @@ class FileMonitorApp:
                         record_count = rows
                     continue
                 
-                # If no specific recipe applied, just pass the original file through
                 processed_files.append(f)
 
-            # STEP 3: The Vault (Encryption)
             zip_path = os.path.join(self.base_dir, f"{ic}_{bn}.zip")
             zip_files_with_password(processed_files, zip_path, info['encryption_key'], f"{ic}_{bn}")
             
-            # STEP 4: The Strict 10MB Guard
             file_size_mb = os.path.getsize(zip_path) / (1024 * 1024)
             limit = self.local_config.getfloat('PREFS', 'max_size_mb', fallback=10.0)
             
             if file_size_mb > limit:
                 raise Exception(f"Batch is {file_size_mb:.2f}MB (Limit: {limit}MB).\nDraft aborted. Please use a split recipe.")
 
-            # STEP 5: Dispatch Assembly & Logging
             subject_template = self.master_config.get('EMAIL_TEMPLATES', 'subject_template', fallback="{inst_code} Loads {date} Batch {batch_number}")
             footer = "\n\n" + self.master_config.get('EMAIL_TEMPLATES', 'email_footer', fallback="Regards,")
             core_msg = info['message'] if info.get('message') else ""
@@ -227,7 +209,6 @@ class FileMonitorApp:
             date_str = datetime.now().strftime('%d/%m/%Y')
             subject = subject_template.format(inst_code=ic, date=date_str, batch_number=bn)
             
-            # Apply count to subject if recipe demanded it
             if 'add_count' in recipes and record_count > 0:
                 subject += f" ({record_count})"
 
@@ -239,7 +220,6 @@ class FileMonitorApp:
                 self.file_monitor.remove_from_queue(bn)
                 self.gui.log_activity(f"SUCCESS: {ic} Batch {bn} by {self.gui.current_user}")
                 
-                # STEP 6: Post-Process Action
                 post_action = self.local_config.get('PREFS', 'post_process', fallback='keep')
                 if post_action == 'delete':
                     for f in raw_files:
@@ -255,7 +235,6 @@ class FileMonitorApp:
             messagebox.showerror("Process Error", str(e))
             self.gui.log_activity(f"ERROR: {str(e)}")
         finally:
-            # Clean up generated ZIPs and temp Excel/PDF/TIFF files so they don't clutter the drive
             if 'zip_path' in locals() and os.path.exists(zip_path): 
                 os.remove(zip_path)
             for tf in temp_files:

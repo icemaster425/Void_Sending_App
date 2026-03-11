@@ -82,15 +82,19 @@ def transform_excel(file_path, output_dir, recipes):
             
             # Use System Excel to convert
             pythoncom.CoInitialize()
-            excel = win32.gencache.EnsureDispatch('Excel.Application')
-            excel.Visible = False
-            excel.DisplayAlerts = False
             try:
+                # Swapped gencache for late binding client.Dispatch
+                excel = win32.client.Dispatch('Excel.Application')
+                excel.Visible = False
+                excel.DisplayAlerts = False
                 wb = excel.Workbooks.Open(os.path.abspath(temp_xlsx))
                 wb.SaveAs(os.path.abspath(save_path), FileFormat=56) # 56 = Legacy XLS
                 wb.Close()
             finally:
-                excel.Quit()
+                if 'excel' in locals():
+                    excel.Quit()
+                # Added the missing thread cleanup
+                pythoncom.CoUninitialize()
             
             if os.path.exists(temp_xlsx):
                 os.remove(temp_xlsx)
@@ -99,7 +103,7 @@ def transform_excel(file_path, output_dir, recipes):
         else:
             df.to_excel(save_path, index=False, engine='openpyxl')
     except Exception as e:
-        # Fallback to standard save if Excel isn't installed
+        # Fallback to standard save (now safe since xlwt is in requirements)
         df.to_excel(save_path, index=False)
         
     return save_path, record_count
