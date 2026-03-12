@@ -86,7 +86,8 @@ def transform_excel(file_path, output_dir, recipes):
             # Use System Excel to convert
             pythoncom.CoInitialize()
             try:
-                excel = win32.client.Dispatch('Excel.Application')
+                # Proper Win32 dispatch syntax
+                excel = win32.Dispatch('Excel.Application')
                 excel.Visible = False
                 excel.DisplayAlerts = False
                 wb = excel.Workbooks.Open(os.path.abspath(temp_xlsx))
@@ -103,9 +104,15 @@ def transform_excel(file_path, output_dir, recipes):
             df.to_csv(save_path, index=False)
         else:
             df.to_excel(save_path, index=False, engine='openpyxl')
+            
     except Exception as e:
-        # Fallback to standard save
-        df.to_excel(save_path, index=False)
+        # BULLETPROOF FALLBACK: Explicitly define engines so Pandas doesn't crash
+        if new_ext == '.xls':
+            df.to_excel(save_path, index=False, engine='xlwt')
+        elif new_ext == '.xlsx':
+            df.to_excel(save_path, index=False, engine='openpyxl')
+        else:
+            df.to_csv(save_path, index=False)
         
     return save_path, record_count
 
