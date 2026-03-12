@@ -47,12 +47,13 @@ def transform_excel(file_path, output_dir, recipes):
     filename = os.path.basename(file_path)
     orig_ext = os.path.splitext(filename)[1].lower()
     
+    # THE FIX: Gag the auto-parser. Force strict string interpretation.
     if orig_ext == '.csv':
-        df = pd.read_csv(file_path)
+        df = pd.read_csv(file_path, dtype=str)
     elif orig_ext == '.xls':
-        df = pd.read_excel(file_path, engine='xlrd')
+        df = pd.read_excel(file_path, engine='xlrd', dtype=str)
     else:
-        df = pd.read_excel(file_path, engine='openpyxl')
+        df = pd.read_excel(file_path, engine='openpyxl', dtype=str)
 
     record_count = len(df)
 
