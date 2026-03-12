@@ -65,12 +65,15 @@ def transform_excel(file_path, output_dir, recipes):
         for col in [c for c in df.columns if 'id' in c.lower()]:
             df[col] = df[col].astype(str).apply(lambda x: x[:2] + '*' * (len(x)-4) + x[-2:] if len(x) > 4 else "****")
 
-    new_ext = orig_ext
+    # Hard-lock the default output to .xls
+    new_ext = '.xls'
+    
+    # Only override if a specific recipe demands an alternative format
     if 'xls_to_xlsx' in recipes: new_ext = '.xlsx'
-    elif 'xlsx_to_xls' in recipes: new_ext = '.xls'
     elif 'xlsx_to_csv' in recipes or 'xls_to_csv' in recipes: new_ext = '.csv'
         
-    new_filename = os.path.splitext(filename)[0] + "_processed" + new_ext
+    # Clean, identical filename without the _processed tag
+    new_filename = os.path.splitext(filename)[0] + new_ext
     save_path = os.path.join(output_dir, new_filename)
     
     # THE OUTSIDE-THE-BOX FIX: Excel Handshake
@@ -83,7 +86,6 @@ def transform_excel(file_path, output_dir, recipes):
             # Use System Excel to convert
             pythoncom.CoInitialize()
             try:
-                # Swapped gencache for late binding client.Dispatch
                 excel = win32.client.Dispatch('Excel.Application')
                 excel.Visible = False
                 excel.DisplayAlerts = False
@@ -93,7 +95,6 @@ def transform_excel(file_path, output_dir, recipes):
             finally:
                 if 'excel' in locals():
                     excel.Quit()
-                # Added the missing thread cleanup
                 pythoncom.CoUninitialize()
             
             if os.path.exists(temp_xlsx):
@@ -103,7 +104,7 @@ def transform_excel(file_path, output_dir, recipes):
         else:
             df.to_excel(save_path, index=False, engine='openpyxl')
     except Exception as e:
-        # Fallback to standard save (now safe since xlwt is in requirements)
+        # Fallback to standard save
         df.to_excel(save_path, index=False)
         
     return save_path, record_count
