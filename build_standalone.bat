@@ -13,19 +13,20 @@ if exist "VOID- Sending App.spec" del /q "VOID- Sending App.spec"
 :: 2. Ensure all required libraries are installed locally
 echo [2/4] Verifying dependencies...
 pip install -r requirements.txt
-pip install pyinstaller
+pip install pyinstaller Pillow
 
 :: 3. Run the PyInstaller command
 echo [3/4] Compiling VOID- Sending App.exe...
 pyinstaller --noconsole --onefile --icon="New_void_icon.ico" --name "VOID- Sending App" ^
---collect-submodules xlwt ^
---hidden-import "xlwt" ^
 --hidden-import "pandas" ^
 --hidden-import "openpyxl" ^
 --hidden-import "xlrd" ^
 --hidden-import "PyPDF2" ^
 --hidden-import "win32com" ^
+--hidden-import "win32com.client" ^
 --hidden-import "pythoncom" ^
+--hidden-import "pywintypes" ^
+--hidden-import "pyminizip" ^
 --hidden-import "fitz" ^
 --hidden-import "PIL" ^
 main.py
