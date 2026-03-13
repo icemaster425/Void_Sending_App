@@ -6,9 +6,10 @@ from PyPDF2 import PdfReader, PdfWriter
 import fitz  # PyMuPDF
 import win32com.client as win32
 import pythoncom
+from PIL import Image
 
 def check_file_integrity(file_path):
-    file_path = str(file_path) # Force string to kill OS errors
+    file_path = str(file_path)
     if not os.path.exists(file_path) or os.path.getsize(file_path) == 0:
         return False, "File is missing or 0 bytes."
     initial_size = os.path.getsize(file_path)
@@ -41,8 +42,15 @@ def convert_pdf_to_tiff(file_path, output_dir):
     doc = fitz.open(file_path)
     base_name = os.path.splitext(os.path.basename(file_path))[0]
     output_path = os.path.join(output_dir, f"{base_name}.tiff")
+    
+    # Render PDF page to a raw pixmap
     pix = doc[0].get_pixmap(matrix=fitz.Matrix(2, 2))
-    pix.save(output_path)
+    
+    # Hand off the raw pixels to Pillow to construct a valid TIFF
+    mode = "RGBA" if pix.alpha else "RGB"
+    img = Image.frombytes(mode, [pix.width, pix.height], pix.samples)
+    img.save(output_path, format="TIFF", compression="tiff_deflate")
+    
     doc.close()
     return [str(output_path)]
 
@@ -68,15 +76,14 @@ def transform_excel(file_path, output_dir, recipes):
         for col in [c for c in df.columns if 'id' in c.lower()]:
             df[col] = df[col].astype(str).apply(lambda x: x[:2] + '*' * (len(x)-4) + x[-2:] if len(x) > 4 else "****")
 
-    # SMART LOGIC: Respect original format by default
     new_ext = orig_ext
     
-    # Recipe Overrides
     if 'xls_to_xlsx' in recipes: new_ext = '.xlsx'
     elif 'xlsx_to_xls' in recipes: new_ext = '.xls'
     elif 'xlsx_to_csv' in recipes or 'xls_to_csv' in recipes: new_ext = '.csv'
         
-    new_filename = os.path.splitext(filename)[0] + "_processed" + new_ext
+    # The clean output name, exact match to original unless overridden
+    new_filename = os.path.splitext(filename)[0] + new_ext
     save_path = os.path.join(output_dir, new_filename)
     
     try:
@@ -105,7 +112,7 @@ def transform_excel(file_path, output_dir, recipes):
             df.to_excel(save_path, index=False, engine='openpyxl')
             
     except Exception as e:
-        # Bulletproof fallback to XLSX if COM fails (prevents xlwt crash)
+        # Fallback to XLSX if COM fails, totally bypassing the xlwt crash
         fallback_path = os.path.splitext(save_path)[0] + ".xlsx"
         df.to_excel(fallback_path, index=False, engine='openpyxl')
         return str(fallback_path), record_count
