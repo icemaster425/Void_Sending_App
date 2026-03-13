@@ -24,11 +24,12 @@ jobs:
     - name: Install Dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install pandas PyQt5 openpyxl watchdog pyinstaller xlrd xlwt xlsxwriter pywin32 pyminizip cryptography PyPDF2 PyMuPDF python-dotenv
+        # Notice xlwt is completely gone from this list
+        pip install pandas PyQt5 openpyxl watchdog pyinstaller xlrd xlsxwriter pywin32 pyminizip cryptography PyPDF2 PyMuPDF python-dotenv
 
     - name: Build VOID Executable
-      # Forcing the hidden imports into the payload
-      run: pyinstaller --noconsole --onefile --icon="New_void_icon.ico" --name="VOID-App" --hidden-import=pandas --hidden-import=openpyxl --hidden-import=xlwt --hidden-import=xlrd --hidden-import=win32com --hidden-import=win32com.client --hidden-import=pythoncom --hidden-import=pywintypes --hidden-import=pyminizip --hidden-import=fitz --hidden-import=outlook_integration --hidden-import=encryption_utils main.py
+      # Lean, focused payload without the broken xlwt ghost
+      run: pyinstaller --noconsole --onefile --icon="New_void_icon.ico" --name="VOID-App" --hidden-import=pandas --hidden-import=openpyxl --hidden-import=xlrd --hidden-import=win32com --hidden-import=win32com.client --hidden-import=pythoncom --hidden-import=pywintypes --hidden-import=pyminizip --hidden-import=fitz --hidden-import=outlook_integration --hidden-import=encryption_utils main.py
 
     - name: Upload VOID Artifact
       uses: actions/upload-artifact@v4
