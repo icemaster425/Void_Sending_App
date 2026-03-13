@@ -8,6 +8,7 @@ import win32com.client as win32
 import pythoncom
 
 def check_file_integrity(file_path):
+    file_path = str(file_path) # Force string to kill OS errors
     if not os.path.exists(file_path) or os.path.getsize(file_path) == 0:
         return False, "File is missing or 0 bytes."
     initial_size = os.path.getsize(file_path)
@@ -21,6 +22,7 @@ def check_file_integrity(file_path):
     return True, "Success"
 
 def split_pdf_pages(file_path, output_dir):
+    file_path, output_dir = str(file_path), str(output_dir)
     reader = PdfReader(file_path)
     base_name = os.path.splitext(os.path.basename(file_path))[0]
     generated_files = []
@@ -31,23 +33,24 @@ def split_pdf_pages(file_path, output_dir):
         output_path = os.path.join(output_dir, output_filename)
         with open(output_path, "wb") as f:
             writer.write(f)
-        generated_files.append(output_path)
+        generated_files.append(str(output_path))
     return generated_files
 
 def convert_pdf_to_tiff(file_path, output_dir):
+    file_path, output_dir = str(file_path), str(output_dir)
     doc = fitz.open(file_path)
     base_name = os.path.splitext(os.path.basename(file_path))[0]
     output_path = os.path.join(output_dir, f"{base_name}.tiff")
     pix = doc[0].get_pixmap(matrix=fitz.Matrix(2, 2))
     pix.save(output_path)
     doc.close()
-    return [output_path]
+    return [str(output_path)]
 
 def transform_excel(file_path, output_dir, recipes):
+    file_path, output_dir = str(file_path), str(output_dir)
     filename = os.path.basename(file_path)
     orig_ext = os.path.splitext(filename)[1].lower()
     
-    # THE FIX: Gag the auto-parser. Force strict string interpretation.
     if orig_ext == '.csv':
         df = pd.read_csv(file_path, dtype=str)
     elif orig_ext == '.xls':
@@ -57,7 +60,6 @@ def transform_excel(file_path, output_dir, recipes):
 
     record_count = len(df)
 
-    # Apply Transformation Recipes
     if 'trim_whitespace' in recipes:
         df = df.applymap(lambda x: x.strip() if isinstance(x, str) else x)
     if 'remove_duplicates' in recipes:
@@ -66,33 +68,29 @@ def transform_excel(file_path, output_dir, recipes):
         for col in [c for c in df.columns if 'id' in c.lower()]:
             df[col] = df[col].astype(str).apply(lambda x: x[:2] + '*' * (len(x)-4) + x[-2:] if len(x) > 4 else "****")
 
-    # Hard-lock the default output to .xls
-    new_ext = '.xls'
+    # SMART LOGIC: Respect original format by default
+    new_ext = orig_ext
     
-    # Only override if a specific recipe demands an alternative format
+    # Recipe Overrides
     if 'xls_to_xlsx' in recipes: new_ext = '.xlsx'
+    elif 'xlsx_to_xls' in recipes: new_ext = '.xls'
     elif 'xlsx_to_csv' in recipes or 'xls_to_csv' in recipes: new_ext = '.csv'
         
-    # Clean, identical filename without the _processed tag
-    new_filename = os.path.splitext(filename)[0] + new_ext
+    new_filename = os.path.splitext(filename)[0] + "_processed" + new_ext
     save_path = os.path.join(output_dir, new_filename)
     
-    # THE OUTSIDE-THE-BOX FIX: Excel Handshake
     try:
         if new_ext == ".xls":
-            # Save as modern first
             temp_xlsx = save_path + "x"
             df.to_excel(temp_xlsx, index=False, engine='openpyxl')
             
-            # Use System Excel to convert
             pythoncom.CoInitialize()
             try:
-                # Proper Win32 dispatch syntax
                 excel = win32.Dispatch('Excel.Application')
                 excel.Visible = False
                 excel.DisplayAlerts = False
                 wb = excel.Workbooks.Open(os.path.abspath(temp_xlsx))
-                wb.SaveAs(os.path.abspath(save_path), FileFormat=56) # 56 = Legacy XLS
+                wb.SaveAs(os.path.abspath(save_path), FileFormat=56) 
                 wb.Close()
             finally:
                 if 'excel' in locals():
@@ -107,17 +105,17 @@ def transform_excel(file_path, output_dir, recipes):
             df.to_excel(save_path, index=False, engine='openpyxl')
             
     except Exception as e:
-        # BULLETPROOF FALLBACK: Explicitly define engines so Pandas doesn't crash
-        if new_ext == '.xls':
-            df.to_excel(save_path, index=False, engine='xlwt')
-        elif new_ext == '.xlsx':
-            df.to_excel(save_path, index=False, engine='openpyxl')
-        else:
-            df.to_csv(save_path, index=False)
+        # Bulletproof fallback to XLSX if COM fails (prevents xlwt crash)
+        fallback_path = os.path.splitext(save_path)[0] + ".xlsx"
+        df.to_excel(fallback_path, index=False, engine='openpyxl')
+        return str(fallback_path), record_count
         
-    return save_path, record_count
+    return str(save_path), record_count
 
 def zip_files_with_password(file_paths, zip_path, password, batch_name=""):
+    # Enforce strict string types for PyMiniZip C-Extension
+    file_paths = [str(f) for f in file_paths]
+    zip_path, password = str(zip_path), str(password)
     prefixes = ["" for _ in file_paths]
     pyminizip.compress_multiple(file_paths, prefixes, zip_path, password, 5)
     return zip_path

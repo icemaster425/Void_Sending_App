@@ -143,9 +143,12 @@ class FileMonitorApp:
             messagebox.showerror("Network Error", "Not connected to Master Storage. Please check your Settings tab.")
             return
 
-        ic = batch_data.get('institution_code')
-        bn = batch_data.get('batch_number')
-        raw_files = [f for f, var in batch_data['file_vars'].items() if var.get()]
+        ic = str(batch_data.get('institution_code'))
+        bn = str(batch_data.get('batch_number'))
+        
+        # TITANIUM FIX: Force explicit string casting so Tkinter lists don't crash the OS parser
+        raw_files = [str(f) for f, var in batch_data['file_vars'].items() if var.get()]
+        
         info = self.db_manager.get_institution_by_code(ic)
         
         if not info:
@@ -181,19 +184,22 @@ class FileMonitorApp:
                         continue
 
                 if ext in ['.xls', '.xlsx']:
-                    # THE FIX: Argument order is now corrected
                     new_path, rows = transform_excel(f, self.base_dir, recipes)
-                    processed_files.append(new_path)
-                    temp_files.append(new_path)
+                    processed_files.append(str(new_path))
+                    temp_files.append(str(new_path))
                     
                     if 'add_count' in recipes:
                         record_count = rows
                     continue
                 
-                processed_files.append(f)
+                processed_files.append(str(f))
 
-            zip_path = os.path.join(self.base_dir, f"{ic}_{bn}.zip")
-            zip_files_with_password(processed_files, zip_path, info['encryption_key'], f"{ic}_{bn}")
+            # TITANIUM FIX: Double down on string casting before passing to PyMiniZip
+            processed_files = [str(p) for p in processed_files]
+            zip_path = str(os.path.join(self.base_dir, f"{ic}_{bn}.zip"))
+            zip_pwd = str(info['encryption_key']) if info.get('encryption_key') else ""
+            
+            zip_files_with_password(processed_files, zip_path, zip_pwd, f"{ic}_{bn}")
             
             file_size_mb = os.path.getsize(zip_path) / (1024 * 1024)
             limit = self.local_config.getfloat('PREFS', 'max_size_mb', fallback=10.0)
