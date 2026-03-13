@@ -30,11 +30,9 @@ class FileMonitorApp:
         
         self.setup_logging()
         
-        # 1. Load Local Config (Settings Tab preferences)
         self.local_config_path = os.path.join(self.base_dir, 'local_config.ini')
         self.local_config = self.load_local_config()
         
-        # 2. Setup Default Folder Logic
         self.default_monitor_path = os.path.join(self.base_dir, "To Send")
         if not os.path.exists(self.default_monitor_path):
             os.makedirs(self.default_monitor_path)
@@ -42,7 +40,6 @@ class FileMonitorApp:
         self.root.title("V.O.I.D. - Initializing...")
         self.root.geometry("1200x800")
         
-        # 3. Initialize Shared Resources
         self.db_manager = None
         self.master_config = None
         self.outlook_integration = OutlookIntegration()
@@ -146,7 +143,6 @@ class FileMonitorApp:
         ic = str(batch_data.get('institution_code'))
         bn = str(batch_data.get('batch_number'))
         
-        # TITANIUM FIX: Force explicit string casting so Tkinter lists don't crash the OS parser
         raw_files = [str(f) for f, var in batch_data['file_vars'].items() if var.get()]
         
         info = self.db_manager.get_institution_by_code(ic)
@@ -194,8 +190,13 @@ class FileMonitorApp:
                 
                 processed_files.append(str(f))
 
-            # TITANIUM FIX: Double down on string casting before passing to PyMiniZip
-            processed_files = [str(p) for p in processed_files]
+            # THE FIX: Absolute flattening protocol to kill 2D lists before they reach the OS parsers
+            flat_processed = []
+            for p in processed_files:
+                if isinstance(p, list): flat_processed.extend([str(x) for x in p])
+                else: flat_processed.append(str(p))
+            processed_files = flat_processed
+
             zip_path = str(os.path.join(self.base_dir, f"{ic}_{bn}.zip"))
             zip_pwd = str(info['encryption_key']) if info.get('encryption_key') else ""
             
@@ -229,13 +230,13 @@ class FileMonitorApp:
                 post_action = self.local_config.get('PREFS', 'post_process', fallback='keep')
                 if post_action == 'delete':
                     for f in raw_files:
-                        os.remove(f)
+                        os.remove(str(f))
                 elif post_action == 'archive':
                     master_db_dir = os.path.dirname(self.local_config.get('PATHS', 'db_path'))
                     archive_folder = os.path.join(master_db_dir, '..', 'Archive', f"{date_str.replace('/','-')}_{ic}_{bn}")
                     os.makedirs(archive_folder, exist_ok=True)
                     for f in raw_files:
-                        shutil.move(f, os.path.join(archive_folder, os.path.basename(f)))
+                        shutil.move(str(f), os.path.join(archive_folder, os.path.basename(str(f))))
                 
         except Exception as e:
             messagebox.showerror("Process Error", str(e))
@@ -243,9 +244,16 @@ class FileMonitorApp:
         finally:
             if 'zip_path' in locals() and os.path.exists(zip_path): 
                 os.remove(zip_path)
+            
+            # THE FIX: Absolute flattening protocol for cleanup
+            flat_temp = []
             for tf in temp_files:
-                if os.path.exists(tf): 
-                    os.remove(tf)
+                if isinstance(tf, list): flat_temp.extend([str(x) for x in tf])
+                else: flat_temp.append(str(tf))
+                
+            for tf in flat_temp:
+                if os.path.exists(str(tf)): 
+                    os.remove(str(tf))
 
     def start_monitoring(self, folder_path):
         if not self.db_manager:

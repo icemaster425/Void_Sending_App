@@ -43,14 +43,29 @@ def convert_pdf_to_tiff(file_path, output_dir):
     base_name = os.path.splitext(os.path.basename(file_path))[0]
     output_path = os.path.join(output_dir, f"{base_name}.tiff")
     
-    # Render PDF page to a raw pixmap
-    pix = doc[0].get_pixmap(matrix=fitz.Matrix(2, 2))
+    image_frames = []
     
-    # Hand off the raw pixels to Pillow to construct a valid TIFF
-    mode = "RGBA" if pix.alpha else "RGB"
-    img = Image.frombytes(mode, [pix.width, pix.height], pix.samples)
-    img.save(output_path, format="TIFF", compression="tiff_deflate")
-    
+    # Extract all pages into memory
+    for page in doc:
+        pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
+        mode = "RGBA" if pix.alpha else "RGB"
+        
+        # THE FIX: Pillow strictly requires a tuple (), not a list [] for size parameters.
+        img = Image.frombytes(mode, (pix.width, pix.height), pix.samples)
+        
+        # Force uniform RGB mode to prevent Pillow from aborting the stitch
+        img = img.convert("RGB")
+        image_frames.append(img)
+        
+    # Stitch and save as a single multi-page TIFF
+    if image_frames:
+        image_frames[0].save(
+            output_path, 
+            format="TIFF", 
+            save_all=True, 
+            append_images=image_frames[1:]
+        )
+        
     doc.close()
     return [str(output_path)]
 
@@ -59,6 +74,7 @@ def transform_excel(file_path, output_dir, recipes):
     filename = os.path.basename(file_path)
     orig_ext = os.path.splitext(filename)[1].lower()
     
+    # Load data with strict string typing to prevent leading zeroes from dropping
     if orig_ext == '.csv':
         df = pd.read_csv(file_path, dtype=str)
     elif orig_ext == '.xls':
@@ -68,21 +84,44 @@ def transform_excel(file_path, output_dir, recipes):
 
     record_count = len(df)
 
+    # --- DATA RECIPES ---
     if 'trim_whitespace' in recipes:
         df = df.applymap(lambda x: x.strip() if isinstance(x, str) else x)
+        
     if 'remove_duplicates' in recipes:
         df.drop_duplicates(inplace=True)
+        
     if 'mask_id' in recipes:
         for col in [c for c in df.columns if 'id' in c.lower()]:
             df[col] = df[col].astype(str).apply(lambda x: x[:2] + '*' * (len(x)-4) + x[-2:] if len(x) > 4 else "****")
 
+    # Column A Splitters (BSB and Farm)
+    if 'bsb_split' in recipes or 'farm_split' in recipes:
+        orig_col = df.columns[0] # Target Column A
+        
+        # Pop the column completely out of the dataframe first to kill naming collisions
+        orig_data = df.pop(orig_col).astype(str).str.replace(r'\.0$', '', regex=True)
+        
+        if 'bsb_split' in recipes:
+            if 'BSB' in df.columns: df.drop(columns=['BSB'], inplace=True)
+            if 'Account Number' in df.columns: df.drop(columns=['Account Number'], inplace=True)
+            
+            df.insert(0, 'BSB', orig_data.str[:6])
+            df.insert(1, 'Account Number', orig_data.str[6:])
+            
+        elif 'farm_split' in recipes:
+            if 'Farm Number' in df.columns: df.drop(columns=['Farm Number'], inplace=True)
+            if 'Party Number' in df.columns: df.drop(columns=['Party Number'], inplace=True)
+            
+            df.insert(0, 'Farm Number', orig_data.str[:5])
+            df.insert(1, 'Party Number', orig_data.str[5:])
+
+    # --- EXTENSION ROUTING ---
     new_ext = orig_ext
-    
     if 'xls_to_xlsx' in recipes: new_ext = '.xlsx'
     elif 'xlsx_to_xls' in recipes: new_ext = '.xls'
     elif 'xlsx_to_csv' in recipes or 'xls_to_csv' in recipes: new_ext = '.csv'
         
-    # The clean output name, exact match to original unless overridden
     new_filename = os.path.splitext(filename)[0] + new_ext
     save_path = os.path.join(output_dir, new_filename)
     
@@ -112,7 +151,6 @@ def transform_excel(file_path, output_dir, recipes):
             df.to_excel(save_path, index=False, engine='openpyxl')
             
     except Exception as e:
-        # Fallback to XLSX if COM fails, totally bypassing the xlwt crash
         fallback_path = os.path.splitext(save_path)[0] + ".xlsx"
         df.to_excel(fallback_path, index=False, engine='openpyxl')
         return str(fallback_path), record_count
@@ -120,9 +158,15 @@ def transform_excel(file_path, output_dir, recipes):
     return str(save_path), record_count
 
 def zip_files_with_password(file_paths, zip_path, password, batch_name=""):
-    # Enforce strict string types for PyMiniZip C-Extension
-    file_paths = [str(f) for f in file_paths]
+    if not file_paths: return zip_path # Fail-safe against empty lists crashing the C-extension
+    
+    # Bulletproof list flattening
+    flat_paths = []
+    for f in file_paths:
+        if isinstance(f, list): flat_paths.extend([str(x) for x in f])
+        else: flat_paths.append(str(f))
+        
     zip_path, password = str(zip_path), str(password)
-    prefixes = ["" for _ in file_paths]
-    pyminizip.compress_multiple(file_paths, prefixes, zip_path, password, 5)
+    prefixes = ["" for _ in flat_paths]
+    pyminizip.compress_multiple(flat_paths, prefixes, zip_path, password, 5)
     return zip_path
