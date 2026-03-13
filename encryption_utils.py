@@ -43,30 +43,44 @@ def convert_pdf_to_tiff(file_path, output_dir):
     base_name = os.path.splitext(os.path.basename(file_path))[0]
     output_path = os.path.join(output_dir, f"{base_name}.tiff")
     
-    image_frames = []
+    temp_files = []
     
-    # Extract all pages into memory
-    for page in doc:
-        pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
-        mode = "RGBA" if pix.alpha else "RGB"
+    # PHASE 1: PyMuPDF Isolation (Bumped to 3x Matrix for premium clarity)
+    for i, page in enumerate(doc):
+        pix = page.get_pixmap(matrix=fitz.Matrix(3, 3), alpha=False)
+        temp_path = os.path.join(output_dir, f"{base_name}_temp_{i}.png")
+        pix.save(temp_path)  # Force write to disk
+        temp_files.append(temp_path)
         
-        # THE FIX: Pillow strictly requires a tuple (), not a list [] for size parameters.
-        img = Image.frombytes(mode, (pix.width, pix.height), pix.samples)
-        
-        # Force uniform RGB mode to prevent Pillow from aborting the stitch
-        img = img.convert("RGB")
-        image_frames.append(img)
-        
-    # Stitch and save as a single multi-page TIFF
-    if image_frames:
-        image_frames[0].save(
+    doc.close()
+    
+    # PHASE 2: Pillow Stitching - Pure 8-Bit Grayscale
+    if temp_files:
+        images = []
+        for t_file in temp_files:
+            img = Image.open(t_file)
+            # The Premium Move: 8-bit Grayscale (L mode), no harsh thresholding
+            img = img.convert("L")
+            images.append(img)
+            
+        # Stitch all static images into a single high-res payload
+        images[0].save(
             output_path, 
             format="TIFF", 
             save_all=True, 
-            append_images=image_frames[1:]
+            append_images=images[1:],
+            compression="tiff_lzw"  # Lossless compression compatible with deep grayscale
         )
         
-    doc.close()
+        # Release OS locks
+        for img in images:
+            img.close()
+            
+        # Assassinate the temp files
+        for t_file in temp_files:
+            if os.path.exists(t_file):
+                os.remove(t_file)
+                
     return [str(output_path)]
 
 def transform_excel(file_path, output_dir, recipes):
@@ -74,7 +88,6 @@ def transform_excel(file_path, output_dir, recipes):
     filename = os.path.basename(file_path)
     orig_ext = os.path.splitext(filename)[1].lower()
     
-    # Load data with strict string typing to prevent leading zeroes from dropping
     if orig_ext == '.csv':
         df = pd.read_csv(file_path, dtype=str)
     elif orig_ext == '.xls':
@@ -84,7 +97,6 @@ def transform_excel(file_path, output_dir, recipes):
 
     record_count = len(df)
 
-    # --- DATA RECIPES ---
     if 'trim_whitespace' in recipes:
         df = df.applymap(lambda x: x.strip() if isinstance(x, str) else x)
         
@@ -95,11 +107,9 @@ def transform_excel(file_path, output_dir, recipes):
         for col in [c for c in df.columns if 'id' in c.lower()]:
             df[col] = df[col].astype(str).apply(lambda x: x[:2] + '*' * (len(x)-4) + x[-2:] if len(x) > 4 else "****")
 
-    # Column A Splitters (BSB and Farm)
     if 'bsb_split' in recipes or 'farm_split' in recipes:
-        orig_col = df.columns[0] # Target Column A
+        orig_col = df.columns[0] 
         
-        # Pop the column completely out of the dataframe first to kill naming collisions
         orig_data = df.pop(orig_col).astype(str).str.replace(r'\.0$', '', regex=True)
         
         if 'bsb_split' in recipes:
@@ -116,7 +126,6 @@ def transform_excel(file_path, output_dir, recipes):
             df.insert(0, 'Farm Number', orig_data.str[:5])
             df.insert(1, 'Party Number', orig_data.str[5:])
 
-    # --- EXTENSION ROUTING ---
     new_ext = orig_ext
     if 'xls_to_xlsx' in recipes: new_ext = '.xlsx'
     elif 'xlsx_to_xls' in recipes: new_ext = '.xls'
@@ -158,9 +167,8 @@ def transform_excel(file_path, output_dir, recipes):
     return str(save_path), record_count
 
 def zip_files_with_password(file_paths, zip_path, password, batch_name=""):
-    if not file_paths: return zip_path # Fail-safe against empty lists crashing the C-extension
+    if not file_paths: return zip_path
     
-    # Bulletproof list flattening
     flat_paths = []
     for f in file_paths:
         if isinstance(f, list): flat_paths.extend([str(x) for x in f])
