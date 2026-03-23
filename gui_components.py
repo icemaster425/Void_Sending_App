@@ -8,7 +8,6 @@ class MainWindow:
         self.root = root
         self.app = app_controller
         
-        # 1. Set a temporary title. The popup will update this in a split second.
         self.current_user = "Pending..."
         self.root.title(f"V.O.I.D. - Verified On-boarding Institutional Dispatcher [User: {self.current_user}]")
         
@@ -31,18 +30,15 @@ class MainWindow:
         
         self.batch_panels = {}
         
-        # We wrap these in try-except blocks so the UI doesn't crash if the DB path isn't set yet
         try:
             self.load_institutions()
             self.load_processed_batches()
         except Exception:
-            pass # Fails silently on first run until paths are set in Settings
+            pass 
 
-        # --- THE FIX: Wait 200ms after the main app is drawn, THEN show the popup ---
         self.root.after(200, self.show_login_popup)
 
     def show_login_popup(self):
-        """Pops up a modal selection window for the dispatcher name."""
         staff_fallback = "Dianne, Dony, Natasha, Nes, Ricci, Lynda, Maria, Michaela"
         try:
             staff_str = self.app.master_config.get('SHARED_SETTINGS', 'staff_list', fallback=staff_fallback)
@@ -51,17 +47,14 @@ class MainWindow:
             
         staff_list = [s.strip() for s in staff_str.split(',')]
         
-        # --- NEW: Retrieve the last used dispatcher from local settings ---
         last_user = self.app.local_config.get('PREFS', 'last_user', fallback="") if self.app.local_config.has_section('PREFS') else ""
         default_user = last_user if last_user in staff_list else staff_list[0]
-        # ------------------------------------------------------------------
         
         win = tk.Toplevel(self.root)
         win.title("V.O.I.D. Login")
         win.geometry("300x150")
         win.resizable(False, False)
         
-        # Force it on top of the ALREADY DRAWN main window
         win.transient(self.root)          
         win.attributes('-topmost', True)  
         
@@ -72,19 +65,15 @@ class MainWindow:
 
         tk.Label(win, text="Who is dispatching today?", font=("Helvetica", 11, "bold"), bg=win.cget("bg")).pack(pady=15)
         
-        # --- NEW: Set the dropdown to the default user ---
         user_var = tk.StringVar(value=default_user)
         combo = ttk.Combobox(win, textvariable=user_var, values=staff_list, state="readonly", font=("Helvetica", 10))
         combo.pack(pady=5, padx=30, fill=tk.X)
         
         def on_confirm():
             selected_name = user_var.get()
-            
-            # Update the user and instantly refresh the main app's title bar!
             self.current_user = selected_name
             self.root.title(f"V.O.I.D. - Verified On-boarding Institutional Dispatcher [User: {self.current_user}]")
             
-            # --- NEW: Save this selection locally for next time ---
             if not self.app.local_config.has_section('PREFS'):
                 self.app.local_config.add_section('PREFS')
             self.app.local_config.set('PREFS', 'last_user', selected_name)
@@ -92,17 +81,11 @@ class MainWindow:
                 with open(self.app.local_config_path, 'w') as f:
                     self.app.local_config.write(f)
             except Exception:
-                pass # Fail silently if we can't save the preference, it's just a convenience feature
-            # ------------------------------------------------------
-            
+                pass 
             win.destroy()
             
         ttk.Button(win, text="Start System", command=on_confirm).pack(pady=15)
-        
-        # If they close the login window with the 'X', close the whole app
         win.protocol("WM_DELETE_WINDOW", lambda: self.root.destroy()) 
-        
-        # Grab all mouse/keyboard clicks so the user MUST log in before clicking the main app
         win.grab_set()
         win.focus_force()
 
@@ -122,6 +105,10 @@ class MainWindow:
         self.style.configure("Edit.Glossy.TButton", background="#007bff", foreground="white")
         self.style.configure("Delete.Glossy.TButton", background="#dc3545", foreground="white")
         self.style.configure("Multi.Glossy.TButton", background="#fd7e14", foreground="white")
+        
+        # --- NEW WARNING STYLES ---
+        self.style.configure("Warning.TLabelframe", background="#ffcccc")
+        self.style.configure("Warning.TLabelframe.Label", background="#ffcccc", foreground="red", font=("Helvetica", 12, "bold"))
 
     def setup_monitoring_tab(self, parent_frame):
         self.folder_frame = ttk.LabelFrame(parent_frame, text="Folder Monitoring", padding="10")
@@ -136,7 +123,6 @@ class MainWindow:
         self.processed_batches_frame = ttk.LabelFrame(self.batches_main_frame, text="Processed Batches (Shared)", padding="10")
         self.processed_batches_frame.pack(fill=tk.BOTH, expand=True, side=tk.RIGHT)
 
-        # History Search/Filter Bar
         self.filter_frame = ttk.Frame(self.processed_batches_frame)
         self.filter_frame.pack(fill=tk.X, pady=(0, 5))
         ttk.Label(self.filter_frame, text="Find (Batch/Inst/Date):").pack(side=tk.LEFT, padx=2)
@@ -215,7 +201,6 @@ class MainWindow:
         tree_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=(10, 5))
         
         self.institutions_tree = ttk.Treeview(tree_frame, columns=("c_code", "i_code", "email", "key", "msg"), show="headings", selectmode="extended")
-        # --- TWEAK 1: Renamed "County Code" to "Country Code" ---
         headings = ["Country Code", "Inst Code", "Email", "Password", "Message"]
         for col, text in zip(self.institutions_tree["columns"], headings):
             self.institutions_tree.heading(col, text=text)
@@ -240,7 +225,6 @@ class MainWindow:
             'key': tk.StringVar()
         }
         
-        # --- TWEAK 1: Renamed label to "Country" ---
         ttk.Label(self.quick_edit_frame, text="Country:").grid(row=0, column=0, padx=5, pady=2, sticky=tk.W)
         self.qe_c_code = ttk.Entry(self.quick_edit_frame, textvariable=self.qe_vars['c_code'], width=15)
         self.qe_c_code.grid(row=0, column=1, padx=5, pady=2)
@@ -311,7 +295,6 @@ class MainWindow:
     def add_institution(self):
         win = tk.Toplevel(self.root)
         win.title("Add New Institution")
-        # --- TWEAK 1: Renamed "County Code" to "Country Code" ---
         fields = ["Country Code:", "Institution Code:", "Email:", "Encryption Key:", "Message:"]
         ents = {}
         for i, f in enumerate(fields):
@@ -337,7 +320,6 @@ class MainWindow:
         data = self.app.db_manager.get_institution_by_code(code)
         win = tk.Toplevel(self.root)
         win.title(f"Edit: {code}")
-        # --- TWEAK 1: Renamed "County Code" to "Country Code" ---
         fields = ["Country Code:", "Institution Code:", "Email:", "Encryption Key:", "Message:"]
         ents = {}
         for i, f in enumerate(fields):
@@ -399,16 +381,13 @@ class MainWindow:
                 self.app.db_manager.delete_institution(self.institutions_tree.item(item, 'values')[1])
             self.load_institutions()
 
-    # --- SETTINGS TAB IMPLEMENTATION ---
     def setup_settings_tab(self, parent_frame):
         main_container = ttk.Frame(parent_frame, padding="10")
         main_container.pack(fill=tk.BOTH, expand=True)
 
-        # --- LEFT COLUMN: Network & Data (The "Brain") ---
         network_frame = ttk.LabelFrame(main_container, text="Network & Data (Shared Server)", padding="15")
         network_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 10))
 
-        # DB Path
         ttk.Label(network_frame, text="Shared Database Path (file_monitor.db):", font=("Helvetica", 9, "bold")).pack(anchor=tk.W, pady=(0, 2))
         db_frame = ttk.Frame(network_frame)
         db_frame.pack(fill=tk.X, pady=(0, 15))
@@ -417,7 +396,6 @@ class MainWindow:
         ttk.Entry(db_frame, textvariable=self.db_path_var).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
         ttk.Button(db_frame, text="Browse", style="Glossy.TButton", command=self.browse_db).pack(side=tk.RIGHT)
 
-        # Master Config Path
         ttk.Label(network_frame, text="Master Config Path (master_config.ini):", font=("Helvetica", 9, "bold")).pack(anchor=tk.W, pady=(0, 2))
         cfg_frame = ttk.Frame(network_frame)
         cfg_frame.pack(fill=tk.X, pady=(0, 15))
@@ -426,15 +404,12 @@ class MainWindow:
         ttk.Entry(cfg_frame, textvariable=self.config_path_var).pack(side=tk.LEFT, fill=tk.X, expand=True, padx=(0, 5))
         ttk.Button(cfg_frame, text="Browse", style="Glossy.TButton", command=self.browse_config).pack(side=tk.RIGHT)
 
-        # Connection Status
         self.status_lbl = ttk.Label(network_frame, text="Status: Ready", foreground="gray", font=("Helvetica", 10, "italic"))
         self.status_lbl.pack(anchor=tk.W, pady=(10, 0))
 
-        # --- RIGHT COLUMN: Local User Preferences ---
         prefs_frame = ttk.LabelFrame(main_container, text="Local User Preferences", padding="15")
         prefs_frame.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True)
 
-        # Post Process Action
         ttk.Label(prefs_frame, text="After Successful Draft Creation:", font=("Helvetica", 9, "bold")).pack(anchor=tk.W, pady=(0, 5))
         current_post = self.app.local_config.get('PREFS', 'post_process', fallback='keep') if hasattr(self.app, 'local_config') else 'keep'
         self.post_process_var = tk.StringVar(value=current_post)
@@ -443,15 +418,12 @@ class MainWindow:
         ttk.Radiobutton(prefs_frame, text="Move original files to Master Archive", variable=self.post_process_var, value='archive').pack(anchor=tk.W, pady=2)
         ttk.Radiobutton(prefs_frame, text="Delete original files permanently", variable=self.post_process_var, value='delete').pack(anchor=tk.W, pady=2)
 
-        # Size Guard limit (defaults to 10.0 if not found)
         ttk.Label(prefs_frame, text="Max Email Attachment Limit (MB):", font=("Helvetica", 9, "bold")).pack(anchor=tk.W, pady=(20, 5))
         current_max = self.app.local_config.get('PREFS', 'max_size_mb', fallback='10.0') if hasattr(self.app, 'local_config') else '10.0'
         
-        # Storing as string to prevent DoubleVar from turning empty fields into 0.0 immediately
         self.max_size_var = tk.StringVar(value=str(current_max))
         ttk.Entry(prefs_frame, textvariable=self.max_size_var, width=15).pack(anchor=tk.W)
 
-        # --- BOTTOM FRAME: Save Button ---
         bottom_frame = ttk.Frame(parent_frame)
         bottom_frame.pack(fill=tk.X, pady=10, padx=20)
         ttk.Button(bottom_frame, text="Save & Reconnect", style="Add.Glossy.TButton", command=self.save_settings).pack(side=tk.RIGHT)
@@ -481,8 +453,6 @@ class MainWindow:
         else:
             self.status_lbl.config(text="Status: Connection Failed. Check Paths.", foreground="red")
 
-
-    # --- Standard Operations ---
     def browse_folder(self):
         folder = filedialog.askdirectory()
         if folder:
@@ -512,27 +482,52 @@ class MainWindow:
         for inst in self.app.db_manager.get_all_institutions(): self.institutions_tree.insert("", "end", values=inst)
 
     def add_batch(self, bd):
-        panel = ttk.LabelFrame(self.batches_inner_frame, text=f"Batch {bd['batch_number']} ({bd['institution_code']})", padding="10")
+        panel_style = "TLabelframe"
+        if not bd.get('is_today', True):
+            panel_style = "Warning.TLabelframe"
+
+        panel = ttk.LabelFrame(self.batches_inner_frame, text=f"Batch {bd['batch_number']} ({bd['institution_code']})", padding="10", style=panel_style)
         panel.pack(fill=tk.X, padx=5, pady=5)
         bd['file_vars'] = {}
+        
+        requires_myob = bd['institution_code'] in ['NAB', 'NABC', 'CCA']
+        myob_found = False
+
         for file in bd['files']:
             var = tk.BooleanVar(value=True)
             bd['file_vars'][file] = var
             ttk.Checkbutton(panel, text=os.path.basename(file), variable=var).pack(anchor='w', padx=15)
             
-        # --- TWEAK 2: Added a Frame for Side-by-Side Buttons ---
+            if requires_myob and file.lower().endswith(('.xls', '.xlsx', '.csv')):
+                from encryption_utils import has_myob_id
+                if has_myob_id(file):
+                    myob_found = True
+
+        if requires_myob and not myob_found:
+            ttk.Label(panel, text="⚠ Cannot Find MYOB_ID, Please check if correct file is selected", foreground="red", font=("Helvetica", 10, "bold")).pack(anchor='w', padx=15, pady=5)
+            bd['missing_myob'] = True
+
         btn_frame = ttk.Frame(panel)
         btn_frame.pack(pady=5)
         
-        ttk.Button(btn_frame, text="Create Draft", style="Edit.Glossy.TButton", command=lambda b=bd: self.app.process_batch(b)).pack(side=tk.LEFT, padx=5)
-        
-        # --- TWEAK 2: New 'Close Without Drafting' button ---
+        ttk.Button(btn_frame, text="Create Draft", style="Edit.Glossy.TButton", command=lambda b=bd: self.confirm_and_draft(b)).pack(side=tk.LEFT, padx=5)
         ttk.Button(btn_frame, text="Close Without Drafting", style="Delete.Glossy.TButton", command=lambda bn=bd['batch_number']: self.cancel_batch_processing(bn)).pack(side=tk.LEFT, padx=5)
         
         self.batch_panels[bd['batch_number']] = panel
         self.batches_canvas.config(scrollregion=self.batches_canvas.bbox("all"))
 
-    # --- TWEAK 2: The Logic to cancel and clear the panel ---
+    def confirm_and_draft(self, bd):
+        if not bd.get('is_today', True):
+            if not messagebox.askyesno("Date Warning", "The date of the file is not today.\nAre you sure you want to send this?"):
+                self.cancel_batch_processing(bd['batch_number'])
+                return
+                
+        if bd.get('missing_myob', False):
+            if not messagebox.askyesno("Missing MYOB_ID", "Cannot Find MYOB_ID.\nPlease check if correct file is selected.\n\nProceed anyway?"):
+                return
+                
+        self.app.process_batch(bd)
+
     def cancel_batch_processing(self, batch_number):
         if messagebox.askyesno("Cancel", "Discard this detected batch without creating drafts?"):
             self.remove_batch_panel(batch_number)

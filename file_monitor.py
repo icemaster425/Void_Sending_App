@@ -2,6 +2,7 @@ import os
 import time
 import threading
 import re
+from datetime import datetime
 
 class FileMonitor(threading.Thread):
     def __init__(self, folder_path, db_manager, message_queue, file_extensions, batch_length):
@@ -17,8 +18,6 @@ class FileMonitor(threading.Thread):
         self.batch_length = int(batch_length) if str(batch_length).isdigit() else 6
         
         self.running = False
-        
-        # Keeps track of batches already pushed to the UI so it doesn't spam duplicates
         self.detected_batches = set()
 
     def run(self):
@@ -35,6 +34,7 @@ class FileMonitor(threading.Thread):
             return
 
         current_batches = {}
+        today_str = datetime.now().strftime('%d%m%Y')
 
         # STEP 1: Scan all files and group them by Batch Number
         for filename in os.listdir(self.folder_path):
@@ -44,16 +44,16 @@ class FileMonitor(threading.Thread):
             if not os.path.isfile(file_path):
                 continue
 
-            # Check if file matches our allowed extensions (.pdf, .xls, .xlsx)
+            # Check if file matches our allowed extensions
             ext = os.path.splitext(filename)[1].lower()
             if ext not in self.file_extensions:
                 continue
 
             inst_code = "PENDING"
             batch_num = None
+            is_today = True # Default for Excel which doesn't have dates in name
 
             # RULE 1: Excel Files (BatchNumber_InstitutionCode.ext)
-            # Example: 220593_ANZ.xlsx -> Batch: 220593, Code: ANZ
             if ext in ['.xls', '.xlsx']:
                 match = re.match(r'^(\d+)_([A-Za-z0-9]+)', filename)
                 if match:
@@ -61,12 +61,12 @@ class FileMonitor(threading.Thread):
                     inst_code = match.group(2).upper()
 
             # RULE 2: PDF Files (Date_BatchNumber.pdf)
-            # Example: 20052025_220593.pdf -> Date: 20052025, Batch: 220593
             elif ext == '.pdf':
                 match = re.match(r'^(\d+)_(\d+)', filename)
                 if match:
-                    # Group 2 is the batch number for PDFs based on your naming convention
+                    file_date = match.group(1)
                     batch_num = match.group(2)
+                    is_today = (file_date == today_str)
                     inst_code = "PENDING"
 
             # Grouping Logic: Add the file to the correct Batch dictionary
@@ -75,33 +75,33 @@ class FileMonitor(threading.Thread):
                     current_batches[batch_num] = {
                         'institution_code': inst_code,
                         'batch_number': batch_num,
-                        'files': []
+                        'files': [],
+                        'is_today': True
                     }
                 
                 current_batches[batch_num]['files'].append(file_path)
                 
-                # If this file gave us the real Institution Code (from an Excel file), 
-                # update the whole group so any PDFs in this batch know who they belong to.
+                # Flag the entire batch if even one file is outdated
+                if not is_today:
+                    current_batches[batch_num]['is_today'] = False
+                
+                # Update the whole group so PDFs know who they belong to
                 if inst_code != "PENDING":
                     current_batches[batch_num]['institution_code'] = inst_code
 
         # STEP 2: Push completed batches to the GUI
         for b_num, data in current_batches.items():
-            # We cannot process a batch if we don't know the Institution Code yet
-            # (e.g., if only the PDF has arrived in the folder so far)
             if data['institution_code'] == "PENDING":
                 continue
 
             if b_num not in self.detected_batches:
                 self.detected_batches.add(b_num)
                 
-                # Send the batch data to populate the UI panel
                 self.message_queue.put({
                     'type': 'batch_detected',
                     'data': data
                 })
                 
-                # Log the detection in the activity feed
                 file_count = len(data['files'])
                 self.message_queue.put({
                     'type': 'activity',
@@ -113,9 +113,4 @@ class FileMonitor(threading.Thread):
         self.message_queue.put({'type': 'activity', 'data': "Monitoring stopped."})
 
     def remove_from_queue(self, batch_number):
-        """
-        Called by main.py when a batch is successfully processed.
-        We leave it in the detected_batches set to prevent the monitor from 
-        re-adding it if the user has 'Keep Files' selected in their Settings tab.
-        """
         pass

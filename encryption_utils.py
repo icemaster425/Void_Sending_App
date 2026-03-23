@@ -1,4 +1,3 @@
-import pyminizip
 import os
 import time
 import pandas as pd
@@ -7,6 +6,7 @@ import fitz  # PyMuPDF
 import win32com.client as win32
 import pythoncom
 from PIL import Image
+import pyzipper
 
 def check_file_integrity(file_path):
     file_path = str(file_path)
@@ -37,6 +37,42 @@ def split_pdf_pages(file_path, output_dir):
         generated_files.append(str(output_path))
     return generated_files
 
+def remove_first_and_split_pdf(file_path, output_dir):
+    """Specific Recipe for Rabo: Skip page 1, split the rest."""
+    file_path, output_dir = str(file_path), str(output_dir)
+    reader = PdfReader(file_path)
+    base_name = os.path.splitext(os.path.basename(file_path))[0]
+    generated_files = []
+    
+    if len(reader.pages) <= 1:
+        return [] 
+        
+    for i in range(1, len(reader.pages)):
+        writer = PdfWriter()
+        writer.add_page(reader.pages[i])
+        output_filename = f"{base_name}_Page_{i+1}.pdf"
+        output_path = os.path.join(output_dir, output_filename)
+        with open(output_path, "wb") as f:
+            writer.write(f)
+        generated_files.append(str(output_path))
+    return generated_files
+
+def has_myob_id(file_path):
+    """Rapid UI scanner to verify MYOB_ID exists without loading full data."""
+    try:
+        ext = os.path.splitext(file_path)[1].lower()
+        if ext == '.csv':
+            df = pd.read_csv(file_path, nrows=0)
+        elif ext == '.xls':
+            df = pd.read_excel(file_path, engine='xlrd', nrows=0)
+        else:
+            df = pd.read_excel(file_path, engine='openpyxl', nrows=0)
+            
+        cols = [str(c).strip().upper() for c in df.columns]
+        return 'MYOB_ID' in cols
+    except Exception:
+        return False
+
 def convert_pdf_to_tiff(file_path, output_dir):
     file_path, output_dir = str(file_path), str(output_dir)
     doc = fitz.open(file_path)
@@ -45,41 +81,32 @@ def convert_pdf_to_tiff(file_path, output_dir):
     
     temp_files = []
     
-    # PHASE 1: PyMuPDF Isolation (Bumped to 3x Matrix for premium clarity)
     for i, page in enumerate(doc):
         pix = page.get_pixmap(matrix=fitz.Matrix(3, 3), alpha=False)
         temp_path = os.path.join(output_dir, f"{base_name}_temp_{i}.png")
-        pix.save(temp_path)  # Force write to disk
+        pix.save(temp_path)
         temp_files.append(temp_path)
         
     doc.close()
     
-    # PHASE 2: Pillow Stitching - Pure 8-Bit Grayscale
     if temp_files:
         images = []
         for t_file in temp_files:
             img = Image.open(t_file)
-            # The Premium Move: 8-bit Grayscale (L mode), no harsh thresholding
             img = img.convert("L")
             images.append(img)
             
-        # Stitch all static images into a single high-res payload
         images[0].save(
             output_path, 
             format="TIFF", 
             save_all=True, 
             append_images=images[1:],
-            compression="tiff_lzw"  # Lossless compression compatible with deep grayscale
+            compression="tiff_lzw" 
         )
         
-        # Release OS locks
-        for img in images:
-            img.close()
-            
-        # Assassinate the temp files
+        for img in images: img.close()
         for t_file in temp_files:
-            if os.path.exists(t_file):
-                os.remove(t_file)
+            if os.path.exists(t_file): os.remove(t_file)
                 
     return [str(output_path)]
 
@@ -109,20 +136,17 @@ def transform_excel(file_path, output_dir, recipes):
 
     if 'bsb_split' in recipes or 'farm_split' in recipes:
         orig_col = df.columns[0] 
-        
         orig_data = df.pop(orig_col).astype(str).str.replace(r'\.0$', '', regex=True)
         
         if 'bsb_split' in recipes:
             if 'BSB' in df.columns: df.drop(columns=['BSB'], inplace=True)
             if 'Account Number' in df.columns: df.drop(columns=['Account Number'], inplace=True)
-            
             df.insert(0, 'BSB', orig_data.str[:6])
             df.insert(1, 'Account Number', orig_data.str[6:])
             
         elif 'farm_split' in recipes:
             if 'Farm Number' in df.columns: df.drop(columns=['Farm Number'], inplace=True)
             if 'Party Number' in df.columns: df.drop(columns=['Party Number'], inplace=True)
-            
             df.insert(0, 'Farm Number', orig_data.str[:5])
             df.insert(1, 'Party Number', orig_data.str[5:])
 
@@ -148,12 +172,10 @@ def transform_excel(file_path, output_dir, recipes):
                 wb.SaveAs(os.path.abspath(save_path), FileFormat=56) 
                 wb.Close()
             finally:
-                if 'excel' in locals():
-                    excel.Quit()
+                if 'excel' in locals(): excel.Quit()
                 pythoncom.CoUninitialize()
             
-            if os.path.exists(temp_xlsx):
-                os.remove(temp_xlsx)
+            if os.path.exists(temp_xlsx): os.remove(temp_xlsx)
         elif new_ext == ".csv":
             df.to_csv(save_path, index=False)
         else:
@@ -174,7 +196,19 @@ def zip_files_with_password(file_paths, zip_path, password, batch_name=""):
         if isinstance(f, list): flat_paths.extend([str(x) for x in f])
         else: flat_paths.append(str(f))
         
-    zip_path, password = str(zip_path), str(password)
-    prefixes = ["" for _ in flat_paths]
-    pyminizip.compress_multiple(flat_paths, prefixes, zip_path, password, 5)
+    zip_path = str(zip_path)
+    password = str(password).strip() if password else ""
+    
+    if not password or password.lower() == "none":
+        with pyzipper.AESZipFile(zip_path, 'w', compression=pyzipper.ZIP_DEFLATED) as zf:
+            for f in flat_paths:
+                if os.path.exists(f):
+                    zf.write(f, os.path.basename(f))
+    else:
+        with pyzipper.AESZipFile(zip_path, 'w', compression=pyzipper.ZIP_DEFLATED, encryption=pyzipper.WZ_ZIPCRYPTO) as zf:
+            zf.setpassword(password.encode('utf-8'))
+            for f in flat_paths:
+                if os.path.exists(f):
+                    zf.write(f, os.path.basename(f))
+                    
     return zip_path

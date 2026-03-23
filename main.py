@@ -20,7 +20,8 @@ from encryption_utils import (
     transform_excel, 
     check_file_integrity, 
     split_pdf_pages,
-    convert_pdf_to_tiff
+    convert_pdf_to_tiff,
+    remove_first_and_split_pdf
 )
 
 class FileMonitorApp:
@@ -173,6 +174,11 @@ class FileMonitorApp:
                         processed_files.extend(splits)
                         temp_files.extend(splits)
                         continue
+                    elif 'rabo_split' in recipes:
+                        splits = remove_first_and_split_pdf(f, self.base_dir)
+                        processed_files.extend(splits)
+                        temp_files.extend(splits)
+                        continue
                     elif 'pdf_to_tiff' in recipes:
                         tiffs = convert_pdf_to_tiff(f, self.base_dir)
                         processed_files.extend(tiffs)
@@ -190,7 +196,6 @@ class FileMonitorApp:
                 
                 processed_files.append(str(f))
 
-            # THE FIX: Absolute flattening protocol to kill 2D lists before they reach the OS parsers
             flat_processed = []
             for p in processed_files:
                 if isinstance(p, list): flat_processed.extend([str(x) for x in p])
@@ -245,7 +250,6 @@ class FileMonitorApp:
             if 'zip_path' in locals() and os.path.exists(zip_path): 
                 os.remove(zip_path)
             
-            # THE FIX: Absolute flattening protocol for cleanup
             flat_temp = []
             for tf in temp_files:
                 if isinstance(tf, list): flat_temp.extend([str(x) for x in tf])
