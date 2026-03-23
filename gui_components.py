@@ -93,6 +93,7 @@ class MainWindow:
         self.style = ttk.Style()
         self.style.theme_use("alt")
         purple, gold = "#4B0082", "#FFD700"
+        
         self.style.configure("TNotebook", background=purple)
         self.style.configure("TNotebook.Tab", padding=[10, 5], background=gold, foreground="black")
         self.style.map("TNotebook.Tab", background=[("selected", "#FFA500")])
@@ -106,9 +107,21 @@ class MainWindow:
         self.style.configure("Delete.Glossy.TButton", background="#dc3545", foreground="white")
         self.style.configure("Multi.Glossy.TButton", background="#fd7e14", foreground="white")
         
-        # --- NEW WARNING STYLES ---
-        self.style.configure("Warning.TLabelframe", background="#ffcccc")
-        self.style.configure("Warning.TLabelframe.Label", background="#ffcccc", foreground="red", font=("Helvetica", 12, "bold"))
+        # --- EXPLICIT UNIFIED NORMAL STYLES ---
+        normal_bg = "#E6E6E6" 
+        self.style.configure("Normal.TLabelframe", background=normal_bg)
+        self.style.configure("Normal.TLabelframe.Label", background=normal_bg, foreground=purple, font=("Helvetica", 12, "bold"))
+        self.style.configure("Normal.TFrame", background=normal_bg)
+        self.style.configure("Normal.TCheckbutton", background=normal_bg)
+        self.style.configure("NormalText.TLabel", background=normal_bg, foreground="black", font=("Helvetica", 10, "bold"))
+
+        # --- EXPLICIT UNIFIED WARNING STYLES ---
+        warn_bg = "#ffcccc"
+        self.style.configure("Warning.TLabelframe", background=warn_bg)
+        self.style.configure("Warning.TLabelframe.Label", background=warn_bg, foreground="red", font=("Helvetica", 12, "bold"))
+        self.style.configure("Warning.TFrame", background=warn_bg)
+        self.style.configure("Warning.TCheckbutton", background=warn_bg)
+        self.style.configure("WarningText.TLabel", background=warn_bg, foreground="red", font=("Helvetica", 10, "bold"))
 
     def setup_monitoring_tab(self, parent_frame):
         self.folder_frame = ttk.LabelFrame(parent_frame, text="Folder Monitoring", padding="10")
@@ -482,9 +495,12 @@ class MainWindow:
         for inst in self.app.db_manager.get_all_institutions(): self.institutions_tree.insert("", "end", values=inst)
 
     def add_batch(self, bd):
-        panel_style = "TLabelframe"
-        if not bd.get('is_today', True):
-            panel_style = "Warning.TLabelframe"
+        is_warning_panel = not bd.get('is_today', True)
+        
+        panel_style = "Warning.TLabelframe" if is_warning_panel else "Normal.TLabelframe"
+        cb_style = "Warning.TCheckbutton" if is_warning_panel else "Normal.TCheckbutton"
+        warning_lbl_style = "WarningText.TLabel" if is_warning_panel else "NormalText.TLabel"
+        btn_frame_style = "Warning.TFrame" if is_warning_panel else "Normal.TFrame"
 
         panel = ttk.LabelFrame(self.batches_inner_frame, text=f"Batch {bd['batch_number']} ({bd['institution_code']})", padding="10", style=panel_style)
         panel.pack(fill=tk.X, padx=5, pady=5)
@@ -496,7 +512,7 @@ class MainWindow:
         for file in bd['files']:
             var = tk.BooleanVar(value=True)
             bd['file_vars'][file] = var
-            ttk.Checkbutton(panel, text=os.path.basename(file), variable=var).pack(anchor='w', padx=15)
+            ttk.Checkbutton(panel, text=os.path.basename(file), variable=var, style=cb_style).pack(anchor='w', padx=15)
             
             if requires_myob and file.lower().endswith(('.xls', '.xlsx', '.csv')):
                 from encryption_utils import has_myob_id
@@ -504,10 +520,10 @@ class MainWindow:
                     myob_found = True
 
         if requires_myob and not myob_found:
-            ttk.Label(panel, text="⚠ Cannot Find MYOB_ID, Please check if correct file is selected", foreground="red", font=("Helvetica", 10, "bold")).pack(anchor='w', padx=15, pady=5)
+            ttk.Label(panel, text="⚠ Cannot Find MYOB_ID. Please check if the correct file is selected.", style=warning_lbl_style, wraplength=280).pack(anchor='w', padx=15, pady=5)
             bd['missing_myob'] = True
 
-        btn_frame = ttk.Frame(panel)
+        btn_frame = ttk.Frame(panel, style=btn_frame_style)
         btn_frame.pack(pady=5)
         
         ttk.Button(btn_frame, text="Create Draft", style="Edit.Glossy.TButton", command=lambda b=bd: self.confirm_and_draft(b)).pack(side=tk.LEFT, padx=5)
