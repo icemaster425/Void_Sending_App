@@ -1,3 +1,5 @@
+import pyminizip
+import zipfile
 import os
 import time
 import pandas as pd
@@ -6,7 +8,6 @@ import fitz  # PyMuPDF
 import win32com.client as win32
 import pythoncom
 from PIL import Image
-import pyzipper
 
 def check_file_integrity(file_path):
     file_path = str(file_path)
@@ -189,6 +190,7 @@ def transform_excel(file_path, output_dir, recipes):
     return str(save_path), record_count
 
 def zip_files_with_password(file_paths, zip_path, password, batch_name=""):
+    """Restored dual-routing legacy zip engine."""
     if not file_paths: return zip_path
     
     flat_paths = []
@@ -200,15 +202,12 @@ def zip_files_with_password(file_paths, zip_path, password, batch_name=""):
     password = str(password).strip() if password else ""
     
     if not password or password.lower() == "none":
-        with pyzipper.AESZipFile(zip_path, 'w', compression=pyzipper.ZIP_DEFLATED) as zf:
+        with zipfile.ZipFile(zip_path, 'w', zipfile.ZIP_DEFLATED) as zf:
             for f in flat_paths:
                 if os.path.exists(f):
                     zf.write(f, os.path.basename(f))
     else:
-        with pyzipper.AESZipFile(zip_path, 'w', compression=pyzipper.ZIP_DEFLATED, encryption=pyzipper.WZ_ZIPCRYPTO) as zf:
-            zf.setpassword(password.encode('utf-8'))
-            for f in flat_paths:
-                if os.path.exists(f):
-                    zf.write(f, os.path.basename(f))
-                    
+        prefixes = ["" for _ in flat_paths]
+        pyminizip.compress_multiple(flat_paths, prefixes, zip_path, password, 5)
+                
     return zip_path
