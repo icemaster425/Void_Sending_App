@@ -502,26 +502,28 @@ class MainWindow:
         warning_lbl_style = "WarningText.TLabel" if is_warning_panel else "NormalText.TLabel"
         btn_frame_style = "Warning.TFrame" if is_warning_panel else "Normal.TFrame"
 
-        panel = ttk.LabelFrame(self.batches_inner_frame, text=f"Batch {bd['batch_number']} ({bd['institution_code']})", padding="10", style=panel_style)
+        inst_code = bd['institution_code']
+        panel = ttk.LabelFrame(self.batches_inner_frame, text=f"Batch {bd['batch_number']} ({inst_code})", padding="10", style=panel_style)
         panel.pack(fill=tk.X, padx=5, pady=5)
         bd['file_vars'] = {}
         
-        requires_myob = bd['institution_code'] in ['NAB', 'NABC', 'CCA']
-        myob_found = False
+        requires_id_check = inst_code in ['NAB', 'NABC', 'CCA']
+        expected_col = 'MYOB_BUSINESS_ID' if inst_code == 'CCA' else 'MYOB_ID'
+        id_found = False
 
         for file in bd['files']:
             var = tk.BooleanVar(value=True)
             bd['file_vars'][file] = var
             ttk.Checkbutton(panel, text=os.path.basename(file), variable=var, style=cb_style).pack(anchor='w', padx=15)
             
-            if requires_myob and file.lower().endswith(('.xls', '.xlsx', '.csv')):
-                from encryption_utils import has_myob_id
-                if has_myob_id(file):
-                    myob_found = True
+            if requires_id_check and file.lower().endswith(('.xls', '.xlsx', '.csv')):
+                from encryption_utils import has_required_column
+                if has_required_column(file, inst_code):
+                    id_found = True
 
-        if requires_myob and not myob_found:
-            ttk.Label(panel, text="⚠ Cannot Find MYOB_ID. Please check if the correct file is selected.", style=warning_lbl_style, wraplength=280).pack(anchor='w', padx=15, pady=5)
-            bd['missing_myob'] = True
+        if requires_id_check and not id_found:
+            ttk.Label(panel, text=f"⚠ Cannot Find {expected_col}. Please check if the correct file is selected.", style=warning_lbl_style, wraplength=280).pack(anchor='w', padx=15, pady=5)
+            bd['missing_id_col'] = expected_col
 
         btn_frame = ttk.Frame(panel, style=btn_frame_style)
         btn_frame.pack(pady=5)
@@ -538,8 +540,8 @@ class MainWindow:
                 self.cancel_batch_processing(bd['batch_number'])
                 return
                 
-        if bd.get('missing_myob', False):
-            if not messagebox.askyesno("Missing MYOB_ID", "Cannot Find MYOB_ID.\nPlease check if correct file is selected.\n\nProceed anyway?"):
+        if 'missing_id_col' in bd:
+            if not messagebox.askyesno("Missing ID", f"Cannot Find {bd['missing_id_col']}.\nPlease check if correct file is selected.\n\nProceed anyway?"):
                 return
                 
         self.app.process_batch(bd)
