@@ -8,6 +8,7 @@ import fitz  # PyMuPDF
 import win32com.client as win32
 import pythoncom
 from PIL import Image
+from openpyxl.utils import get_column_letter
 
 def check_file_integrity(file_path):
     file_path = str(file_path)
@@ -58,8 +59,8 @@ def remove_first_and_split_pdf(file_path, output_dir):
         generated_files.append(str(output_path))
     return generated_files
 
-def has_myob_id(file_path):
-    """Rapid UI scanner to verify MYOB_ID exists without loading full data."""
+def has_required_column(file_path, inst_code):
+    """Rapid UI scanner to verify institution-specific ID exists."""
     try:
         ext = os.path.splitext(file_path)[1].lower()
         if ext == '.csv':
@@ -70,7 +71,13 @@ def has_myob_id(file_path):
             df = pd.read_excel(file_path, engine='openpyxl', nrows=0)
             
         cols = [str(c).strip().upper() for c in df.columns]
-        return 'MYOB_ID' in cols
+        
+        if inst_code == 'CCA':
+            return 'MYOB_BUSINESS_ID' in cols
+        elif inst_code in ['NAB', 'NABC']:
+            return 'MYOB_ID' in cols
+            
+        return True
     except Exception:
         return False
 
@@ -110,6 +117,18 @@ def convert_pdf_to_tiff(file_path, output_dir):
             if os.path.exists(t_file): os.remove(t_file)
                 
     return [str(output_path)]
+
+def _autofit_openpyxl_columns(writer, df, sheet_name='Sheet1'):
+    """Internal function to mathematically stretch columns to fit data."""
+    ws = writer.sheets[sheet_name]
+    for i, col in enumerate(df.columns):
+        col_len = len(str(col))
+        if not df.empty:
+            max_val_len = df[col].astype(str).map(len).max()
+            max_len = max(col_len, max_val_len) + 2 # Add padding
+        else:
+            max_len = col_len + 2
+        ws.column_dimensions[get_column_letter(i + 1)].width = max_len
 
 def transform_excel(file_path, output_dir, recipes):
     file_path, output_dir = str(file_path), str(output_dir)
@@ -162,7 +181,9 @@ def transform_excel(file_path, output_dir, recipes):
     try:
         if new_ext == ".xls":
             temp_xlsx = save_path + "x"
-            df.to_excel(temp_xlsx, index=False, engine='openpyxl')
+            with pd.ExcelWriter(temp_xlsx, engine='openpyxl') as writer:
+                df.to_excel(writer, index=False, sheet_name='Sheet1')
+                _autofit_openpyxl_columns(writer, df)
             
             pythoncom.CoInitialize()
             try:
@@ -170,6 +191,8 @@ def transform_excel(file_path, output_dir, recipes):
                 excel.Visible = False
                 excel.DisplayAlerts = False
                 wb = excel.Workbooks.Open(os.path.abspath(temp_xlsx))
+                ws = wb.ActiveSheet
+                ws.Columns.AutoFit() 
                 wb.SaveAs(os.path.abspath(save_path), FileFormat=56) 
                 wb.Close()
             finally:
@@ -177,14 +200,20 @@ def transform_excel(file_path, output_dir, recipes):
                 pythoncom.CoUninitialize()
             
             if os.path.exists(temp_xlsx): os.remove(temp_xlsx)
+            
         elif new_ext == ".csv":
             df.to_csv(save_path, index=False)
+            
         else:
-            df.to_excel(save_path, index=False, engine='openpyxl')
+            with pd.ExcelWriter(save_path, engine='openpyxl') as writer:
+                df.to_excel(writer, index=False, sheet_name='Sheet1')
+                _autofit_openpyxl_columns(writer, df)
             
     except Exception as e:
         fallback_path = os.path.splitext(save_path)[0] + ".xlsx"
-        df.to_excel(fallback_path, index=False, engine='openpyxl')
+        with pd.ExcelWriter(fallback_path, engine='openpyxl') as writer:
+            df.to_excel(writer, index=False, sheet_name='Sheet1')
+            _autofit_openpyxl_columns(writer, df)
         return str(fallback_path), record_count
         
     return str(save_path), record_count
